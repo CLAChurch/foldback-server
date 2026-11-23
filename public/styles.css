@@ -2,3 +2,5 @@
 
 .pco-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}.pco-actions button{font-size:14px}.setup-callout{margin-top:18px;padding:14px;border-left:3px solid #b4e5d4;background:#25382f;font-size:15px;line-height:1.5}.pco-organization{margin-top:12px;font-size:20px;color:#b4e5d4}#pco-setup{border-bottom:1px solid #354045;padding-bottom:24px;margin-bottom:24px}
 html:has(.admin-body){scroll-behavior:auto}.admin-body{overflow:visible}
+
+.service-picker-panel{margin-top:20px}.service-picker-form{display:grid;grid-template-columns:1fr 1.2fr 1.4fr;gap:16px}.service-picker-form label{margin-top:12px}.service-picker-form .pco-actions,.service-picker-form .older-plans{grid-column:1/-1}.older-plans{display:flex;align-items:center;gap:10px;font-size:14px;color:#bdc8cc}.sync-warning{color:#ffcd9b}@media(max-width:1100px){.service-picker-form{grid-template-columns:1fr}.service-picker-panel .panel-heading{flex-wrap:wrap}}

@@ -1,11 +1,13 @@
 FOLDBACK SERVER — DEBIAN 13 AMD64 INSTALLER
 
-This image installs the current development application. Planning Center
-credential setup works; importing a real plan and following PCO Live, plus
-actual ProPresenter playback integration, are still unfinished.
+New image builds install the development application with Planning Center
+connection setup and read-only plan/service-time selection and Live sync.
+Real account/hardware validation and ProPresenter playback remain pending.
+Existing 0.2.0 ISO downloads need an app update for these newer features.
 
 USB AND HARDWARE
-Verify the ISO against SHA256SUMS. Write the ISO as a disk image to an 8 GB or
+Verify the ISO against its release checksums (ISO-SHA256SUMS for the
+published installer assets, or SHA256SUMS from a fresh full-image build). Write the ISO as a disk image to an 8 GB or
 larger USB using an image writer's raw/DD mode, not by copying the ISO file.
 Boot an x86-64 Intel/AMD mini PC from that USB. This build supports legacy BIOS
 and UEFI without Secure Boot. Recommended: 4 GB RAM, 16 GB internal storage,
@@ -41,7 +43,9 @@ hostname and server IP to campus DNS or the producer device's hosts file.
 
 Enter the pairing code, choose a control-panel password, then configure campus
 name and output. Connect Planning Center, or choose Connect later and load the
-sample service. Credential entry requires trusted HTTPS from a LAN browser.
+sample service. Use Choose a service to follow to select a real plan and
+specific service time, then advance items in PCO Live. Credential entry
+requires trusted HTTPS from a LAN browser.
 Each church supplies its own OAuth application details; a personal token is
 available for an internal integration within a single church organization.
 
@@ -56,7 +60,8 @@ sudo nmtui. Configure an available interface, then return to the TV with
 Ctrl+Alt+F7 or the setup status console with Ctrl+Alt+F1. SSH is not installed.
 State is in /var/lib/foldback; keep backups private because they contain saved
 Planning Center credentials. After restart, sample item starts are preserved.
-Real PCO mid-service recovery remains pending the live integration.
+PCO synchronization resumes the saved service time and original start;
+verify this against the actual account before operational use.
 
 MAINTENANCE AND SHARING
 Linux/Chromium/Node packages come from Debian Stable main and security.

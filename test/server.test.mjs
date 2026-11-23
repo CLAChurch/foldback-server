@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp, createDisplayHandler } from '../src/server.mjs';
 import { Store } from '../src/store.mjs';
+import { PcoFixture, SELECTION } from './fixtures/pco.mjs';
 
 async function setup(t, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'foldback-test-'));
@@ -208,4 +209,29 @@ test('loopback kiosk listener serves display data but no admin or credential rou
   }
   assert.equal((await fetch(origin + '/api/auth/setup', { method: 'POST', body: '{}' })).status, 404);
   assert.equal((await fetch(origin + '/api/display', { method: 'POST', body: '{}' })).status, 404);
+});
+
+test('authenticated PCO catalogs/selection drive the public display independently of producer login', async t => {
+  const fixture = new PcoFixture();
+  const { send, auth, app, directory } = await setup(t, { pcoFetch: fixture.fetch, pcoNow: () => fixture.now, pcoAutomatic: false });
+  assert.equal((await send('/api/pco/service-types', {})).status,401);
+  const cookie=await auth();
+  await send('/api/pco/save',{method:'pat',clientId:'fixture-id',clientSecret:'fixture-private-credential',contactEmail:'fixture@example.org'},cookie);
+  await send('/api/pco/test',{},cookie);
+  assert.deepEqual((await send('/api/pco/service-types',{},cookie)).body.choices,[{id:'10',name:'Fixture campus'}]);
+  assert.equal((await send('/api/pco/plans',{serviceTypeId:'10'},cookie)).body.choices[0].id,'20');
+  assert.deepEqual((await send('/api/pco/times',{serviceTypeId:'10',planId:'20'},cookie)).body.choices.map(time=>time.id),['30','31']);
+  assert.equal((await send('/api/pco/select',SELECTION,cookie,{Origin:'https://foreign.example'})).status,403);
+  const selected=await send('/api/pco/select',SELECTION,cookie);assert.equal(selected.status,200);assert.equal(selected.body.service.source,'pco');
+  assert.equal((await send('/api/demo/advance',{itemId:'1'},cookie)).status,409);
+  assert.equal((await send('/api/demo/load',{},cookie)).status,409);
+  await send('/api/auth/logout',{},cookie);
+  fixture.advance('302',fixture.now-10000);await app.live.poll();
+  const display=await send('/api/display');assert.equal(display.body.service.currentItemId,'2');assert.equal(display.body.people['2'],'Leader Early');
+  assert.ok(!JSON.stringify(display.body).includes('fixture-private'));
+  assert.equal(JSON.parse(readFileSync(join(directory,'state.json'))).pcoSelection.timeId,'30');
+  assert.ok(fixture.calls.every(call=>call.options.method==='GET'));
+  const login=await send('/api/auth/login',{password:'sample test password 123'});const again=login.cookie.split(';')[0];
+  assert.equal((await send('/api/pco/stop',{},again)).body.service,null);
+  assert.equal((await send('/api/demo/load',{},again)).status,200);
 });

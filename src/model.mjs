@@ -10,7 +10,7 @@ export function initialState() {
       personMode: 'scheduled-fallback', personNote: 'Person',
       networkPreference: 'ethernet', serviceTypeId: '',
     },
-    auth: null, service: null, overrides: {}, playback: null, pco: null, pcoDeferred: false,
+    auth: null, service: null, overrides: {}, playback: null, pco: null, pcoDeferred: false, pcoSelection: null,
   };
 }
 
@@ -35,7 +35,7 @@ export function itemOverride(state, itemId) {
 }
 export function personFor(item, settings) {
   if (!item) return '';
-  const note = item.notes?.[settings.personNote] ?? '';
+  const note = item.notes && Object.hasOwn(item.notes, settings.personNote) && typeof item.notes[settings.personNote] === 'string' ? item.notes[settings.personNote] : '';
   if (settings.personMode === 'note') return note;
   if (settings.personMode === 'scheduled') return item.scheduledPerson ?? '';
   return item.scheduledPerson || note;

@@ -1,4 +1,5 @@
 import { randomBytes, createHash } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 
 const BASE = 'https://api.planningcenteronline.com';
 export const CALLBACK_PATH = '/auth/pco/callback';
@@ -47,41 +48,77 @@ export class PlanningCenter {
     this.now = now;
     this.pending = new Map();
     this.busy = false;
+    this.closed = false;
+    this.abort = new AbortController();
+    this.retryAt = 0;
+    this.pollDelay = 2000;
+    this.nextRequestAt = 0;
   }
   reset() { this.pending.clear(); }
+  close() { this.closed = true; this.reset(); this.abort.abort(); }
   async exclusive(operation) {
+    if (this.closed) throw problem('Planning Center connection is closed.', 409);
     if (this.busy) throw problem('Another Planning Center request is in progress. Try again shortly.', 409);
     this.busy = true;
     try { return await operation(); } finally { this.busy = false; }
   }
   save(body, origin) {
     const config = connectionConfig(body, this.store.state.pco, origin);
+    const changed = fingerprint(config) !== fingerprint(this.store.state.pco);
     this.reset();
-    this.store.update(state => { state.pco = config; state.pcoDeferred = false; });
+    this.store.update(state => {
+      state.pco = config; state.pcoDeferred = false;
+      if (changed) {
+        state.pcoSelection = null;
+        if (state.service?.source === 'pco') { state.service.connected = false; state.service.syncMessage = 'Connection changed. Select a service again.'; }
+      }
+    });
   }
   disconnect() {
     this.reset();
     this.store.update(state => {
-      state.pco = null; state.pcoDeferred = false;
-      if (state.service?.source === 'pco') state.service.connected = false;
+      state.pco = null; state.pcoDeferred = false; state.pcoSelection = null;
+      if (state.service?.source === 'pco') { state.service.connected = false; state.service.syncMessage = 'Planning Center disconnected.'; }
     });
   }
-  async request(path, { config, method = 'GET', body, authorization } = {}) {
+  async request(path, { config, method = 'GET', body, authorization, allowMissing = false, signal } = {}) {
     try {
+      if (this.closed) throw problem('Planning Center connection is closed.', 409);
+      if (this.now() < this.retryAt) throw Object.assign(problem('Planning Center is rate limiting requests. Waiting before retrying.', 429), { retryAfterMs: this.retryAt - this.now() });
+      if (this.now() < this.nextRequestAt) await delay(this.nextRequestAt - this.now(), undefined, { signal: this.abort.signal });
       const response = await this.fetch(BASE + path, {
-        method, redirect: 'error', signal: AbortSignal.timeout(10000),
+        method, redirect: 'error', signal: AbortSignal.any([AbortSignal.timeout(10000), this.abort.signal, ...(signal ? [signal] : [])]),
         headers: {
           Accept: 'application/json',
-          'User-Agent': `CampusFoldback/0.1 (mailto:${config.contactEmail})`,
+          'User-Agent': `FoldbackServer/0.4 (mailto:${config.contactEmail})`,
+          ...(path.startsWith('/services/') ? { 'X-PCO-API-Version': '2018-11-01' } : {}),
           ...(body ? { 'Content-Type': 'application/json' } : {}),
           ...(authorization ? { Authorization: authorization } : {}),
         },
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
+      if (this.closed) { await response.body?.cancel(); throw problem('Planning Center connection is closed.', 409); }
+      const limit = Number(response.headers.get('X-PCO-API-Request-Rate-Limit'));
+      const count = Number(response.headers.get('X-PCO-API-Request-Rate-Count'));
+      const period = Number.parseFloat(response.headers.get('X-PCO-API-Request-Rate-Period'));
+      if (Number.isFinite(limit) && limit > 0 && Number.isFinite(period) && period > 0 && Number.isFinite(count) && count >= 0) {
+        const gap = Math.ceil(period * 1000 / Math.max(1, limit - count));
+        this.pollDelay = Math.max(2000, Math.min(60000, gap));
+        this.nextRequestAt = this.now() + Math.min(5000, gap);
+      }
       if (!response.ok) {
         await response.body?.cancel();
-        if ([401, 403].includes(response.status)) throw problem('Planning Center rejected access. Check the credentials and this account’s Services permissions.');
-        if (response.status === 429) throw problem('Planning Center is rate limiting requests. Wait before trying again.', 429);
+        if (allowMissing && response.status === 404) return { data: null };
+        if ([401, 403].includes(response.status)) throw Object.assign(problem('Planning Center rejected access. Check the credentials and this account’s Services permissions.'), { upstreamStatus: response.status });
+        if (response.status === 429) {
+          const after = response.headers.get('Retry-After');
+          const seconds = Number(after);
+          const milliseconds = after && Number.isFinite(seconds) ? seconds * 1000 : Date.parse(after) - this.now();
+          const retryAfterMs = Math.max(1000, Number.isFinite(milliseconds) ? milliseconds : 20000);
+          this.retryAt = this.now() + retryAfterMs;
+          throw Object.assign(problem('Planning Center is rate limiting requests. Waiting before retrying.', 429), { retryAfterMs });
+        }
+        if (response.status === 404) throw problem('The selected Planning Center resource is unavailable. Check the selection and account permissions.', 404);
         throw problem('Planning Center could not complete the request. Try again later.', 502);
       }
       let size = 0;
@@ -91,12 +128,28 @@ export class PlanningCenter {
         if (size > 1048576) throw problem('Planning Center returned an unexpectedly large response.', 502);
         chunks.push(chunk);
       }
+      if (this.closed) throw problem('Planning Center connection is closed.', 409);
       return JSON.parse(Buffer.concat(chunks).toString('utf8'));
     } catch (error) {
       if (error.status) throw error;
       // Upstream bodies and exceptions can contain credentials. Never pass them to logs or clients.
       throw problem('Could not reach Planning Center. Check the server’s internet connection and try again.', 502);
     }
+  }
+  // One serialized read transaction shares authentication and any rotated token.
+  async read(operation) {
+    return this.exclusive(async () => {
+      const config = structuredClone(this.store.state.pco);
+      if (!config) throw problem('Save a Planning Center connection first.');
+      const authorization = await this.authorization(config);
+      const signal = AbortSignal.timeout(30000);
+      return operation(async (path, options = {}) => {
+        if (signal.aborted) throw problem('Planning Center synchronization took too long. Retrying a fresh snapshot.', 502);
+        const url = new URL(path, BASE);
+        if (url.origin !== BASE || url.username || url.password || url.hash || !url.pathname.startsWith('/services/v2/')) throw problem('Invalid Planning Center resource URL.', 502);
+        return this.request(url.pathname + url.search, { config, authorization, allowMissing: options.allowMissing === true, signal });
+      });
+    });
   }
   tokenResult(result) {
     const accessToken = checkedText(result.access_token ?? '', 4096);
@@ -137,6 +190,10 @@ export class PlanningCenter {
         state.pco.verifiedAt = new Date(this.now()).toISOString();
         // Explicit allowlist: the Organization response also has an unrelated secret attribute.
         state.pco.organization = { id: organization.id, name: organization.attributes.name.slice(0, 200) };
+        if (state.pcoSelection && state.pcoSelection.organizationId !== organization.id) {
+          state.pcoSelection = null;
+          if (state.service?.source === 'pco') { state.service.connected = false; state.service.syncMessage = 'Planning Center organization changed. Select a service again.'; }
+        }
       });
       return connectionInfo(this.store.state);
     });

@@ -2,20 +2,24 @@
 
 A self-hosted stage display and password-protected control panel for churches. One small Linux server runs at each campus, serving the local network and an optional directly connected TV. The display follows a fixed, readable 1920 × 1080 layout with Now, Next, notes, and four service clocks.
 
-**Development preview:** the display, sample-service timing, persistent settings, Planning Center credential setup, and Debian USB installer are implemented. **Real Planning Center plan selection/Live synchronization and ProPresenter playback are not implemented yet.** Use this release for pilot evaluation; it cannot follow a real gathering automatically.
+**Development preview:** the display, timing engine, persistent settings, Planning Center connection setup, read-only plan selection/Live synchronization, and Debian USB installer are implemented. **Real church-account validation, physical campus hardware tests and ProPresenter playback integration remain pending.** Use this release for pilot evaluation before relying on it during a gathering.
 
-[Releases and downloads](https://github.com/CLAChurch/foldback-server/releases) · [Update and rollback guide](docs/UPDATES.md) · [Roadmap](docs/NEXT.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+[Releases and downloads](https://github.com/CLAChurch/foldback-server/releases) · [Update and rollback guide](docs/UPDATES.md) · [Roadmap](docs/NEXT.md) · [Corporate Codex handoff](docs/CORPORATE-HANDOFF.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+
+![Stage display following invented PCO records after reconnecting](docs/images/pco-live-preview.jpg)
+
+*Browser verification with invented PCO records; the video estimate holds at zero until PCO advances.*
 
 ## Features and status
 
 | Capability | Status |
 | --- | --- |
 | Passworded producer panel and read-only stage display | Implemented |
-| Now/Next, people/notes, countdown, end-on-time and projected finish | Implemented with sample data |
+| Now/Next, people/notes, countdown, end-on-time and projected finish | Implemented for sample and selected PCO services |
 | Independent display updates and timing after closing the panel | Implemented |
 | Durable campus settings, item starts and video overrides | Implemented |
 | Per-install Planning Center OAuth/token setup and Services access test | Implemented; real church account verification pending |
-| Real plan/time selection, assignments and PCO Live polling | Planned |
+| Real plan/time selection, assignments and PCO Live polling | Implemented; account-backed validation pending |
 | ProPresenter playback telemetry | Planned |
 | Direct TV kiosk; stop local renderer for ProPresenter mode | Implemented; physical hardware tests pending |
 | Debian 13 amd64 offline USB install, BIOS and UEFI | VM tested; Secure Boot unsupported |
@@ -26,13 +30,13 @@ The server works independently of the Mac or Windows machine running ProPresente
 
 ## Releases
 
-The existing **0.2.0 ISO** is a Debian 13 installer. **0.3.0 source/update packages** add the updater and health endpoint; they do not turn the 0.2.0 ISO into a newly tested 0.3.0 image. Bootstrap the updater once on an existing appliance using [these instructions](docs/UPDATES.md). Each download is identified by its own version.
+The existing **0.2.0 ISO** is a Debian 13 installer. **0.3.0** introduced the updater; **0.4.0** adds PCO Live synchronization. These are application updates; they do not turn the 0.2.0 ISO into a newly built or validated 0.4.0 image. Bootstrap the updater once on an existing appliance using [these instructions](docs/UPDATES.md). Each download is identified by its own version.
 
 Large ISO files and matching Linux/Debian sources are release assets, never Git commits. Keep the matching source archives, build configuration, checksums and notices when redistributing an ISO. The automated tag workflow publishes small application-update packages; building and validating a complete OS image is a separate process.
 
 ## Install on a mini PC
 
-Download an ISO and its `SHA256SUMS` from the releases page, verify the checksum, then follow the [USB instructions](appliance/USB-INSTRUCTIONS.txt). The image includes Debian Stable main, the kernel, networking tools, and all runtime dependencies. Use an x86-64 Intel/AMD PC; 4 GB RAM, 16 GB internal storage and an 8 GB USB are recommended starting points, pending physical testing. Installation erases the selected target disk after confirmation. No full desktop is installed; a minimal X/Chromium renderer starts for direct-TV mode. Disk installation requires an explicit disk-specific erase confirmation. Installation does not require an internet download.
+Download an ISO and its matching `ISO-SHA256SUMS` from the releases page, verify the checksum, then follow the [USB instructions](appliance/USB-INSTRUCTIONS.txt). The image includes Debian Stable main, the kernel, networking tools, and all runtime dependencies. Use an x86-64 Intel/AMD PC; 4 GB RAM, 16 GB internal storage and an 8 GB USB are recommended starting points, pending physical testing. Installation erases the selected target disk after confirmation. No full desktop is installed; a minimal X/Chromium renderer starts for direct-TV mode. Disk installation requires an explicit disk-specific erase confirmation. Installation does not require an internet download.
 
 The server starts automatically with a unique campus hostname and TLS identity. Use the on-screen pairing code to create its control-panel password. Wi-Fi is configured locally with `sudo nmtui`; hardware requiring proprietary firmware is outside this main-only image. See [build and redistribution notes](appliance/BUILD.md) for the matching source archives and licences.
 
@@ -74,7 +78,7 @@ On an appliance with the updater installed:
 
 ```sh
 sudo foldback-update --repository CLAChurch/foldback-server --check
-sudo foldback-update --repository CLAChurch/foldback-server --install v0.3.0
+sudo foldback-update --repository CLAChurch/foldback-server --install v0.4.0
 sudo foldback-update --rollback
 ```
 
@@ -100,11 +104,25 @@ Use HTTPS for credential entry from another computer. Plain HTTP credential setu
 
 **Personal token · own church only** is available for an internal integration in a single Planning Center organization, with credentials belonging to that church. Enter that account's token Application ID and Secret, plus a contact email for API identification. This is not the sign-in method for a published multi-church integration.
 
-Credentials inherit the Planning Center user's permissions. The connection test reads only `/services/v2` to verify Services access and display the organization's name. This does not yet verify live item starts or scheduled assignments; those need a selected real plan in the next integration phase. Authentication uses Planning Center's token endpoints; the app does not write service data or take control of Live.
+Credentials inherit the Planning Center user's permissions. The connection test reads only `/services/v2` to verify Services access and display the organization's name. This verifies the connection, not a particular plan. Select a service separately to load its item timing and assignments; account-backed checks remain required. Authentication uses Planning Center's token endpoints; the app does not write service data or take control of Live.
 
 Leave both credential fields blank when saving an unchanged connection. Enter both to replace it. **Remove saved connection** clears this installation's stored credentials/tokens without revoking another campus's access. To revoke provider access, use Planning Center's developer settings.
 
-See [Planning Center's authentication guidance](https://api.planningcenteronline.com/docs/overview/authentication). Actual OAuth registration and church-account connectivity have not yet been tested with the user's account; automated checks use an isolated fake provider.
+See [Planning Center's authentication guidance](https://api.planningcenteronline.com/docs/overview/authentication). Actual OAuth registration and church-account behavior have not yet been tested with a church account; automated checks use an isolated fake provider.
+
+## Follow a Planning Center service
+
+1. Connect your church in **Connections** and choose **Test connection**. OAuth uses the Services scope; each self-hosted installation supplies its own app registration. An internal single-church integration can use a personal token.
+2. In **Choose a service to follow**, select the service type, plan and **specific service time**, then choose **Follow PCO Live**. Recent/upcoming plans are listed by default; optionally include the past year. Rehearsals and other times are not service choices.
+3. Advance items, skip, backtrack and edit the running order **in Planning Center**. This app makes only GET requests to Services; it does not take control of Live. **Stop following** stops local synchronization without changing PCO and allows switching to the sample.
+
+Live is polled about every two seconds; running-order, time and assignment snapshots refresh about every ten seconds. Timing uses the selected service's ItemTime length and original `live_start_at`, not the moment a browser or polling cycle noticed the item. Headers, pre/post-service items and items excluded from that service time never inflate later-duration sums. Edits and reorders preserve the active start and video flags; a genuine retake uses PCO's new start. Missing starts are never invented.
+
+Direct Person assignments resolve from Services people. A TeamPosition resolves against that team and exact position name in the selected plan's scheduled roster, excluding declined times. Multiple matching scheduled people are listed rather than guessed. The selected Person-note field provides optional fallback; restricted roster access produces a producer warning. Only the selected Person-note category and resolved names enter display state, not unrelated staff notes or raw roster records.
+
+The server continues polling after logout or closing the producer tab, and resumes the saved selection after restart. Waiting, non-service-item, other-service-time and completed states are explicit. During a network/permission failure it retains the last known item, keeps elapsed timing, marks data stale and backs off before retrying. Rate-limit headers pace requests and `Retry-After` blocks early retries. API pagination is bounded and cannot redirect credentials to another host. The integration uses Services API version `2018-11-01`.
+
+The implementation is covered by invented API fixtures and browser checks. Actual church-account permissions, Live response shapes and position scheduling must still be verified in a non-production gathering before pilot deployment. See [the PCO operating/validation guide](docs/PCO-LIVE.md).
 
 ## Current behavior
 
@@ -126,7 +144,7 @@ python3 tools/build-update.py --allow-dirty
 
 The last command creates a local test package under ignored `artifacts/update/`. Published releases must be built from committed source without `--allow-dirty`. No dependency download or frontend compilation is required.
 
-Tests cover the brief's clock examples, video loss/reconnection and ambiguous identity, independent person resolution, durable starts/overrides, control-panel authentication, origin rejection, login throttling, session revocation, and independent display event updates. Planning Center checks cover optional setup, credential privacy, PKCE/callback binding/replay rejection, permission failures, and durable refresh-token rotation. Tests use isolated temporary data directories and fake provider responses.
+Tests cover the brief's clock examples, video loss/reconnection and ambiguous identity, independent person resolution, durable starts/overrides, control-panel authentication, origin rejection, login throttling, session revocation, and independent display event updates. Planning Center checks cover optional setup, credential privacy, PKCE/callback binding/replay rejection, permission failures, durable refresh-token rotation, read-only catalog/selection endpoints, per-service timing, roster resolution, skips/backtracking, edits, outages, rate limits, restart and background polling. Tests use isolated temporary data directories and fake provider responses.
 
 See [project decisions](docs/DECISIONS.md) and [integration and appliance work](docs/NEXT.md) for the remaining production work and required hardware checks.
 

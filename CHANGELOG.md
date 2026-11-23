@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 — PCO Live development preview
+
+- Add authenticated service-type/plan/service-time catalogs and a control-panel picker with a saved selection and service-type default.
+- Implement server-side read-only Live polling, per-service ItemTime durations/exclusions, original-start recovery, waiting/completion states and handling for skips, retakes and later edits.
+- Resolve Person assignments and team positions against the selected gathering's roster; support the selected Person-note fallback without exposing unrelated staff notes or raw roster fields.
+- Add bounded pagination, API version pinning, rate-header pacing, Retry-After handling, exponential retry, stale warnings and cancellation on shutdown.
+- Continue synchronization after producer logout and restore it on restart. Keep sample controls separate and preserve video overrides/context through unrelated plan changes.
+- Add integration/browser coverage, PCO operating guidance and a self-contained corporate Codex handoff.
+
+The integration is implemented and tested against invented API records. Real church-account/campus validation and ProPresenter playback remain pending. The USB ISO remains version 0.2.0; this is an application update.
+
 ## 0.3.0 — Development preview
 
 - Publish as **Foldback Server**, with installation, contribution, security, release and recovery documentation.

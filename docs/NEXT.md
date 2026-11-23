@@ -1,15 +1,18 @@
 # Remaining production work
 
-This repository includes the application and a Debian 13 offline appliance-image build. PCO Live synchronization and ProPresenter playback are still unfinished. The resulting installer is for pilot evaluation, not a replacement for the operational foldback system yet.
+This repository includes the application and a Debian 13 offline appliance-image build. PCO Live synchronization is implemented; real-account/hardware validation and ProPresenter playback remain pending. The resulting installer is for pilot evaluation, not a replacement for the operational foldback system yet.
 
-## Planning Center: verify before connecting
+## Planning Center: account-backed validation
 
-1. Use the new Planning Center setup form to connect Abby's account without placing credentials in chat or source files. OAuth is supported for distribution; personal tokens are for internal single-church use. The connection test verifies Services organization access only, not yet live plan data.
-2. Select a concrete plan and a specific service time. Confirm access to the active item and that service time's original `live_start_at`, including after an app restart.
-3. Inspect representative direct-person and position-based assignments. Resolve a position against the selected service's scheduled people. Confirm the desired Person note category.
-4. Implement service-type / plan / service-time selection, campus defaults, pagination, polling/backoff/rate-limit handling, stale status, and change reconciliation. Exclude headings, before/after-service items, and items excluded from the selected service time from later-duration sums. Use per-service item lengths.
-5. Retain current start and playback context through later edits and reorders. Handle skips, backtracking, and plan completion explicitly. Integration must only read PCO; advancing a real gathering stays in PCO Live.
-6. Exercise multiple services in one plan, connection loss, and mid-service recovery against the actual account. Current tests verify the normalized timing model, not those external API behaviors.
+Implemented in 0.4.0: service-type/plan/service-time selection, persisted campus defaults, read-only Live polling, per-service item lengths/exclusions, assignments/person-note fallback, pagination, API pacing/backoff, stale state, edit reconciliation and original-start recovery. Automated and browser checks use invented records; they do not establish real church-account behavior.
+
+1. Connect the church account through the secure campus UI; do not place credentials in chat, Git or handoff files.
+2. Use a non-production plan with two specific service times. Compare actual PCO ItemTime starts, lengths/exclusions and planned finish with the app.
+3. Verify direct-person and position-based assignments, partial/declined times and the selected Person-note category against actual API responses and permissions.
+4. Advance, skip, backtrack, retake and reorder/edit later items in PCO. Confirm the original active start and video override/context remain correct.
+5. Close/log out of the panel, disconnect Internet, restart mid-item and complete a service. Verify the independent TV recovers the right selected gathering and start.
+
+Follow [PCO-LIVE.md](PCO-LIVE.md) for details and account-backed acceptance checks. The app only reads PCO Services; advancing an operational gathering remains in PCO Live.
 
 ## ProPresenter
 
@@ -31,4 +34,4 @@ Remaining:
 - Rebuild and validate a full image when OS/package changes are needed; app-update releases do not rebuild the ISO.
 - Document tested Mac/Windows ProPresenter builds and actual second-stage-output routing.
 
-The current prototype must complete PCO Live and ProPresenter integration before replacing an operational foldback system.
+Complete the account-backed PCO checks, physical appliance validation and ProPresenter integration/routing tests before replacing an operational foldback system.

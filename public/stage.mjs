@@ -1,4 +1,4 @@
-import { clocks, durationText, localTime } from '/lib/model.mjs';
+import { clocks, durationText, localTime, STALE_AFTER_MS } from '/lib/model.mjs';
 
 export function createStage(element, { preview = false } = {}) {
   element.classList.add('stage');
@@ -30,9 +30,13 @@ export function createStage(element, { preview = false } = {}) {
     const notices = [];
     if (view.service?.source === 'sample') notices.push('SAMPLE SERVICE');
     if (transportLost) notices.push('SERVER CONNECTION LOST · TIMING CONTINUES');
-    else if (timing?.stale) notices.push('PCO DATA STALE · LAST KNOWN ITEM');
+    else if (view.service?.source === 'pco' && (!view.service.connected || now - Date.parse(view.service.lastSuccessAt) > STALE_AFTER_MS)) notices.push('PCO DATA STALE · LAST KNOWN ITEM');
     notice.hidden = notices.length === 0; notice.textContent = notices.join('  /  ');
-    if (!timing) return;
+    if (!timing) {
+      set('.stage-empty h1', view.service?.source === 'pco' ? view.service.status === 'complete' ? 'Service complete.' : 'Waiting for PCO Live.' : 'Ready when you are.');
+      set('.stage-empty p:not(.pairing)', view.service?.source === 'pco' ? view.service.statusMessage || 'Waiting for the selected service time.' : 'Choose a service in the control panel.');
+      return;
+    }
     const { item, next } = timing;
     set('.now-title', item.title);
     set('.now-person', view.people[item.id] || '');

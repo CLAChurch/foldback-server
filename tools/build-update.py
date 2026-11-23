@@ -39,6 +39,10 @@ def build(source, output, commit='working-tree'):
     (output/'foldback-update').write_bytes((source/'appliance/rootfs/usr/local/bin/foldback-update').read_bytes())
     (output/'foldback-update').chmod(0o755)
     files=[name,'update.json','foldback-update']
+    for document in ('CORPORATE-HANDOFF.md', 'PCO-LIVE.md'):
+        if (source/'docs'/document).is_file():
+            (output/document).write_bytes((source/'docs'/document).read_bytes())
+            files.append(document)
     (output/'SHA256SUMS').write_text(''.join(module.digest(output/file)+'  '+file+'\n' for file in files))
     return manifest
 

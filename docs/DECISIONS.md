@@ -30,13 +30,13 @@ The app deliberately does not label the current sample as connected to PCO. Play
 ## Sources checked
 
 - [PCO ItemTime](https://api.planningcenteronline.com/docs/apps/services/versions/2018-11-01/vertices/item_time): `live_start_at` and `live_end_at`, related to a specific item and plan time.
-- [PCO ItemAssignment](https://api.planningcenteronline.com/docs/apps/services/versions/2018-11-01/vertices/item_assignment): an assignment can refer to a `Person` or `TeamPosition`. Resolving the latter to the correct scheduled person still needs an account-backed test.
+- [PCO ItemAssignment](https://api.planningcenteronline.com/docs/apps/services/versions/2018-11-01/vertices/item_assignment): an assignment can refer to a `Person` or `TeamPosition`. The adapter resolves the latter using the selected plan/time roster; actual-account scheduling still needs validation.
 - [PCO PlanTime](https://api.planningcenteronline.com/docs/apps/services/versions/2018-11-01/vertices/plan_time): scheduled `ends_at`, and specific service time selection.
 - [PCO authentication](https://api.planningcenteronline.com/docs/overview/authentication): personal tokens for internal single-church use, OAuth for distribution to multiple churches, Services scope, PKCE, and refresh tokens.
 - [BC government announcement](https://news.gov.bc.ca/releases/2026AG0013-000209): permanent UTC−7 Pacific time.
 - [ProPresenter API](https://openapi.propresenter.com/): documented current-content transport and video-countdown endpoints. A countdown value alone is insufficient to establish the current PCO item's video identity.
 - [Renewed Vision stage-screen guide](https://support.renewedvision.com/hc/en-us/articles/360041407794-Using-a-Stage-Screen-to-its-Full-Potential): stage-layout shapes support a web-page fill. This is the documented candidate for routing the local display URL; actual second-foldback rendering still requires a campus test.
 
-Public documentation supports the proposed integration data model. Connection setup and verification are implemented and tested with fake provider responses. Actual account permissions, OAuth registration, selected-service behavior, and item assignments remain unverified.
+Connection setup, plan/time selection and read-only PCO Live synchronization are implemented and tested with invented provider records. Actual account permissions, OAuth registration, selected-service behavior and assignments still need account-backed validation. See PCO-LIVE.md and CORPORATE-HANDOFF.md.
 - Publish as Foldback Server in `CLAChurch/foldback-server`, public, MIT for original code. Keep publishing authentication separate from the developer’s personal GitHub default.
 - Updates are explicit, versioned GitHub release packages with health checks, private backups and rollback; never automatically restart a gathering for an update.

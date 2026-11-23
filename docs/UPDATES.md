@@ -17,7 +17,7 @@ Use a USB if the appliance is offline. In the directory containing those files:
 ```sh
 sha256sum --check SHA256SUMS
 sudo install -o root -g root -m 0755 foldback-update /usr/local/bin/foldback-update
-sudo foldback-update --archive ./foldback-server-0.3.0-update.tar.gz --manifest ./update.json
+sudo foldback-update --archive ./foldback-server-0.4.0-update.tar.gz --manifest ./update.json
 ```
 
 Replace the archive version for later releases. Verify checksums before installing the root-level updater. Checksums detect corruption; obtain the package and checksum file from the intended trusted repository/release. They are not an independent signing system.
@@ -28,14 +28,14 @@ Pair the appliance and create its control-panel password before updating. The up
 
 ```sh
 sudo foldback-update --repository CLAChurch/foldback-server --check
-sudo foldback-update --repository CLAChurch/foldback-server --install v0.3.0
+sudo foldback-update --repository CLAChurch/foldback-server --install v0.4.0
 ```
 
 `--check` uses GitHub's latest stable release. If only prereleases exist, GitHub may return HTTP 404. Choose an explicit published tag for a development prerelease. Once a stable release exists, `--install latest` selects it. Read its release notes before running that command.
 
 The updater downloads the manifest and archive over HTTPS, validates SHA256 and archive paths, checks Node.js and data-schema compatibility, and runs syntax checks/application tests as `foldback`, not root. It stops writers before taking a private backup, installs only the application and an allowlist of appliance helpers/units, then checks the running version through `/api/health`. A failed health check restores the old application, helper files and pre-update data. The updater does not modify `/etc/foldback/server.env`, TLS keys, network connections, passwords or Planning Center credentials.
 
-Sessions live in memory, so producers sign in again after a restart. Saved settings and original sample live-start timestamps survive. Real PCO Live recovery is still pending the live integration.
+Sessions live in memory, so producers sign in again after a restart. Saved settings and original sample live-start timestamps survive. PCO Live polling resumes the persisted service-time selection and reads the original item start again after restart.
 
 ## Rollback and interruption recovery
 

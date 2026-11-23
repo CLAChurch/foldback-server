@@ -8,6 +8,7 @@ import { Sessions, pairingCode, hashPassword, verifyPassword } from './auth.mjs'
 import { displayState, overrideKey, sampleService } from './model.mjs';
 import { PlanningCenter, connectionInfo, CALLBACK_PATH } from './pco.mjs';
 import { physicalOutputs } from './hardware.mjs';
+import { LiveSync } from './pco-live.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const appVersion = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version;
@@ -28,7 +29,7 @@ export function createDisplayHandler(handler) {
   };
 }
 
-export function createApp({ directory = process.env.FOLDBACK_DATA_DIR || join(root, 'data'), secure = false, pcoFetch, pcoNow } = {}) {
+export function createApp({ directory = process.env.FOLDBACK_DATA_DIR || join(root, 'data'), secure = false, pcoFetch, pcoNow, pcoAutomatic = true } = {}) {
   const store = new Store(directory);
   const sessions = new Sessions();
   const pco = new PlanningCenter(store, { fetchImpl: pcoFetch, now: pcoNow });
@@ -41,8 +42,9 @@ export function createApp({ directory = process.env.FOLDBACK_DATA_DIR || join(ro
     settings: store.state.settings, service: store.state.service, overrides: store.state.overrides,
     view: displayState(store.state),
     pco: connectionInfo(store.state),
+    pcoLive: live.info(),
     system: { appliance: process.env.FOLDBACK_APPLIANCE === '1', outputs: physicalOutputs() },
-    integrations: { pco: 'Connection setup available; live plan integration pending', propresenter: 'Current Mac/Windows releases; awaiting campus connection and routing test' },
+    integrations: { pco: 'Read-only plan selection and PCO Live synchronization', propresenter: 'Current Mac/Windows releases; awaiting campus connection and routing test' },
   });
   const publish = () => {
     const event = `event: state\ndata: ${JSON.stringify(displayState(store.state))}\n\n`;
@@ -53,6 +55,7 @@ export function createApp({ directory = process.env.FOLDBACK_DATA_DIR || join(ro
   };
   const heartbeat = setInterval(publish, 10000);
   heartbeat.unref();
+  const live = new LiveSync(store, pco, { publish, ...(pcoNow ? { now: pcoNow } : {}), automatic: pcoAutomatic });
   const json = (response, data, statusCode = 200, headers = {}) => {
     response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8', ...headers });
     response.end(JSON.stringify(data));
@@ -88,7 +91,7 @@ export function createApp({ directory = process.env.FOLDBACK_DATA_DIR || join(ro
   const files = new Map([
     ['/', ['public/index.html', 'text/html']], ['/admin', ['public/index.html', 'text/html']],
     ['/display', ['public/display.html', 'text/html']],
-    ...['app.mjs', 'pco.mjs', 'stage.mjs', 'display.mjs', 'styles.css', 'display.css'].map(name => [`/${name}`, [`public/${name}`, name.endsWith('.css') ? 'text/css' : 'text/javascript']]),
+    ...['app.mjs', 'pco.mjs', 'service-picker.mjs', 'stage.mjs', 'display.mjs', 'styles.css', 'display.css'].map(name => [`/${name}`, [`public/${name}`, name.endsWith('.css') ? 'text/css' : 'text/javascript']]),
     ['/lib/model.mjs', ['src/model.mjs', 'text/javascript']],
     ['/fonts/AtkinsonHyperlegibleNext.ttf', ['public/fonts/AtkinsonHyperlegibleNext.ttf', 'font/ttf']],
   ]);
@@ -111,9 +114,12 @@ export function createApp({ directory = process.env.FOLDBACK_DATA_DIR || join(ro
           requirePrivateTransport(request);
           const binding = /(?:^|;\s*)foldback_pco_oauth=([^;]+)/.exec(request.headers.cookie ?? '')?.[1];
           try {
-            await pco.callback(url.searchParams, binding, token => sessions.validToken(token), originOf(request));
-            // A completed sign-in is distinct from proof that Services is accessible.
-            await pco.verify();
+            await live.manual(async () => {
+              await pco.callback(url.searchParams, binding, token => sessions.validToken(token), originOf(request));
+              // A completed sign-in is distinct from proof that Services is accessible.
+              await pco.verify();
+            });
+            publish();
             response.writeHead(303, { Location: '/admin#connections', 'Set-Cookie': oauthCookie('', 0) });
             return response.end();
           } catch (error) {
@@ -173,16 +179,23 @@ export function createApp({ directory = process.env.FOLDBACK_DATA_DIR || join(ro
       const body = await readBody(request);
       if (path.startsWith('/api/pco/')) {
         if (path !== '/api/pco/defer') requirePrivateTransport(request);
-        if (pco.busy) fail(409, 'Another Planning Center request is in progress. Try again shortly.');
-        if (path === '/api/pco/save') pco.save(body, originOf(request));
-        else if (path === '/api/pco/test') await pco.verify();
-        else if (path === '/api/pco/disconnect') pco.disconnect();
-        else if (path === '/api/pco/defer') store.update(state => { state.pcoDeferred = true; });
-        else if (path === '/api/pco/authorize') {
-          const started = pco.start(sessions.token(request), originOf(request));
-          return json(response, { authorizeUrl: started.url }, 200, { 'Set-Cookie': oauthCookie(started.state) });
-        } else fail(404, 'Not found.');
-        return json(response, adminState());
+        return await live.manual(async () => {
+          if (pco.busy) fail(409, 'Another Planning Center request is in progress. Try again shortly.');
+          const kind = path.slice('/api/pco/'.length);
+          if (['service-types', 'plans', 'times'].includes(kind)) return json(response, await live.browse(kind, body));
+          if (path === '/api/pco/select') await live.select(body);
+          else if (path === '/api/pco/stop') live.stop();
+          else if (path === '/api/pco/save') pco.save(body, originOf(request));
+          else if (path === '/api/pco/test') await pco.verify();
+          else if (path === '/api/pco/disconnect') pco.disconnect();
+          else if (path === '/api/pco/defer') store.update(state => { state.pcoDeferred = true; });
+          else if (path === '/api/pco/authorize') {
+            const started = pco.start(sessions.token(request), originOf(request));
+            return json(response, { authorizeUrl: started.url }, 200, { 'Set-Cookie': oauthCookie(started.state) });
+          } else fail(404, 'Not found.');
+          publish();
+          return json(response, adminState());
+        });
       }
       if (path === '/api/auth/logout') {
         sessions.remove(request);
@@ -201,6 +214,7 @@ export function createApp({ directory = process.env.FOLDBACK_DATA_DIR || join(ro
         } finally { hashing = false; }
       }
       if (path === '/api/settings') {
+        const peopleBefore = JSON.stringify([store.state.settings.personMode, store.state.settings.personNote]);
         store.update(state => {
           state.settings.campus = text(body.campus, 60) || fail(400, 'Enter a campus name.');
           state.settings.output = choice(body.output, ['direct', 'propresenter']);
@@ -211,6 +225,7 @@ export function createApp({ directory = process.env.FOLDBACK_DATA_DIR || join(ro
           state.settings.personNote = text(body.personNote, 80);
           state.settings.networkPreference = choice(body.networkPreference, ['ethernet', 'wifi']);
         });
+        if (peopleBefore !== JSON.stringify([store.state.settings.personMode, store.state.settings.personNote])) live.invalidate();
       } else if (path === '/api/demo/load') {
         if (store.state.service && store.state.service.source !== 'sample') fail(409, 'A real service is selected.');
         store.update(state => { state.service = sampleService(); state.playback = null; });
@@ -248,7 +263,7 @@ export function createApp({ directory = process.env.FOLDBACK_DATA_DIR || join(ro
       json(response, { error: error.status ? error.message : 'Server error. Check the server log.' }, error.status || 500);
     }
   };
-  return { handler, store, code, close: () => { pco.reset(); clearInterval(heartbeat); for (const client of clients) client.end(); } };
+  return { handler, store, code, live, close: () => { live.close(); pco.close(); clearInterval(heartbeat); for (const client of clients) client.end(); } };
 }
 
 if (process.argv[1] && realpathSync(resolve(process.argv[1])) === fileURLToPath(import.meta.url)) {

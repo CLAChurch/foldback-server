@@ -7,7 +7,7 @@ export function renderPlanningCenter(element, { info, request, changed, toast })
     <div class="connection-row"><strong>Planning Center</strong><span class="status-tag">${esc(status)}</span></div>
     ${!info.configured && !info.deferred ? '<p class="setup-callout"><strong>Setup: connect your church</strong><br>Connect now, or skip this step and try the sample service.</p>' : ''}
     ${info.organization ? `<p class="pco-organization">${esc(info.organization.name)}</p>` : ''}
-    ${info.verifiedAt ? `<p class="hint">Last checked ${esc(new Date(info.verifiedAt).toLocaleString())}. Service selection and live-plan sync are still being built.</p>` : ''}
+    ${info.verifiedAt ? `<p class="hint">Last checked ${esc(new Date(info.verifiedAt).toLocaleString())}. <a href="#service-picker">Choose a plan and service time</a> to follow PCO Live.</p>` : ''}
     <form id="pco-form">
       <label>Connection method<select name="method"><option value="oauth" ${info.method === 'oauth' ? 'selected' : ''}>OAuth sign-in</option><option value="pat" ${info.method === 'pat' ? 'selected' : ''}>Personal token · own church only</option></select></label>
       <p class="hint" id="pco-method-help"></p>
