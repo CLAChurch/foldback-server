@@ -78,7 +78,7 @@ On an appliance with the updater installed:
 
 ```sh
 sudo foldback-update --repository CLAChurch/foldback-server --check
-sudo foldback-update --repository CLAChurch/foldback-server --install v0.4.0
+sudo foldback-update --repository CLAChurch/foldback-server --install v0.4.1
 sudo foldback-update --rollback
 ```
 

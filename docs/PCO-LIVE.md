@@ -39,7 +39,7 @@ All Services requests are GET. The adapter never calls the Live control actions 
 
 Pagination follows at most 50 pages per collection, validates origin/path and rejects repeated pages or duplicate primary records. HTTP requests have a ten-second timeout and read transactions have a thirty-second deadline. Incomplete/ambiguous snapshots are not partially committed.
 
-The client pins Services API version `2018-11-01`, reads rate headers to pace requests, honors HTTP 429 `Retry-After`, and uses exponential retry up to a minute between normal failure retries. Long provider retry windows remain blocked, checked in bounded timer chunks. Last-known data remains visible; elapsed clocks continue from their UTC timestamp. Missing successful data for fifteen seconds, or an explicit failure, shows a stale warning. Reconnection loads a fresh snapshot and clears the warning.
+The client pins Services API version `2018-11-01`, reads rate headers to pace requests, honors HTTP 429 `Retry-After`, and uses exponential retry up to a minute between normal failure retries. Long provider retry windows remain blocked, checked in bounded timer chunks. Last-known data remains visible; elapsed clocks continue from their UTC timestamp. Missing successful data for fifteen seconds, or an explicit failure, shows a stale warning. Reconnection loads a fresh snapshot and clears the warning. A failed manual connection test leaves an existing service eligible for automatic recovery; new selections still require verified access.
 
 Heartbeat timestamps update in memory. Durable writes happen for meaningful service changes, selections and overrides, avoiding an fsync on every unchanged polling heartbeat. Startup marks cached PCO state disconnected until a successful read.
 

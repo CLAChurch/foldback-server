@@ -17,7 +17,7 @@ Use a USB if the appliance is offline. In the directory containing those files:
 ```sh
 sha256sum --check SHA256SUMS
 sudo install -o root -g root -m 0755 foldback-update /usr/local/bin/foldback-update
-sudo foldback-update --archive ./foldback-server-0.4.0-update.tar.gz --manifest ./update.json
+sudo foldback-update --archive ./foldback-server-0.4.1-update.tar.gz --manifest ./update.json
 ```
 
 Replace the archive version for later releases. Verify checksums before installing the root-level updater. Checksums detect corruption; obtain the package and checksum file from the intended trusted repository/release. They are not an independent signing system.
@@ -28,7 +28,7 @@ Pair the appliance and create its control-panel password before updating. The up
 
 ```sh
 sudo foldback-update --repository CLAChurch/foldback-server --check
-sudo foldback-update --repository CLAChurch/foldback-server --install v0.4.0
+sudo foldback-update --repository CLAChurch/foldback-server --install v0.4.1
 ```
 
 `--check` uses GitHub's latest stable release. If only prereleases exist, GitHub may return HTTP 404. Choose an explicit published tag for a development prerelease. Once a stable release exists, `--install latest` selects it. Read its release notes before running that command.

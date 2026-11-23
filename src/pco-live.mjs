@@ -200,7 +200,8 @@ export class LiveSync {
   }
   ready() {
     const { pco, pcoSelection } = this.store.state;
-    return Boolean(pcoSelection && pco?.verifiedAt && pco.organization?.id === pcoSelection.organizationId && (pco.method === 'pat' || pco.tokens));
+    // An existing selection was verified when chosen. A failed diagnostic must not stop its recovery.
+    return Boolean(pcoSelection && pco?.organization?.id === pcoSelection.organizationId && (pco?.method === 'pat' || pco?.tokens));
   }
   info() {
     return { selection: this.store.state.pcoSelection ?? null, enabled: this.ready(), syncing: Boolean(this.inflight), nextAttemptAt: this.nextAttemptAt };

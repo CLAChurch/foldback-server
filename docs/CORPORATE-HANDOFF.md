@@ -19,7 +19,7 @@ python3 -m unittest discover -s appliance/tests -v
 
 Use Node.js 20.19+ and Python 3.11+ for tooling. There are no npm dependencies, install step or frontend build. `npm start` serves the application at `http://localhost:3210/admin`; `/display` is the read-only stage view. The first pairing code is printed in the server console. Create a control-panel password of at least twelve characters. There is no default password or bundled PCO credential.
 
-The current application version for this handoff is **0.4.0**, with PCO Live implemented. Check `package.json` and the repository's releases for subsequent changes. The original source/update release was 0.3.0. The existing bootable installer remains **0.2.0**, based on Debian 13. An app update does not rebuild or revalidate that ISO.
+The current application version for this handoff is **0.4.1**, with PCO Live implemented. Check `package.json` and the repository's releases for subsequent changes. The original source/update release was 0.3.0. The existing bootable installer remains **0.2.0**, based on Debian 13. An app update does not rebuild or revalidate that ISO.
 
 Use `codex/` for new development branches. The user explicitly requested publishing this work to the church's GitHub and producing this Markdown transfer document. Preserve unrelated changes and never publish campus state or credentials.
 
@@ -91,7 +91,7 @@ Direct Person assignments resolve from Services people. Team positions match exa
 
 Persisted `pcoSelection` includes organization ID, service-type ID, plan ID and time ID. Changing credentials or verifying another organization invalidates the selection. Overrides use a service identity including organization/service type/plan plus item ID, so they follow items through edits and across service times in one plan. Do not silently reuse an old church's selection after changing accounts.
 
-On outage, keep the last item/start and continue elapsed timing. Mark stale after fifteen seconds without fresh data or immediately on a read failure. Honor `Retry-After`, use rate headers, back off and reload a fresh snapshot after recovery. Stop/close aborts pending reads and prevents late state writes. Heartbeats update in memory; meaningful state changes are persisted, avoiding constant fsync churn.
+On outage, keep the last item/start and continue elapsed timing. Mark stale after fifteen seconds without fresh data or immediately on a read failure. Honor `Retry-After`, use rate headers, back off and reload a fresh snapshot after recovery. Stop/close aborts pending reads and prevents late state writes. A failed manual connection diagnostic does not disable automatic recovery for an already selected service (fixed in 0.4.1). Heartbeats update in memory; meaningful state changes are persisted, avoiding constant fsync churn.
 
 The API guide is [PCO-LIVE.md](https://github.com/CLAChurch/foldback-server/blob/main/docs/PCO-LIVE.md). The key official references are [Plan](https://api.planningcenteronline.com/docs/apps/services/versions/2018-11-01/vertices/plan), [Live](https://api.planningcenteronline.com/docs/apps/services/versions/2018-11-01/vertices/live), [ItemTime](https://api.planningcenteronline.com/docs/apps/services/versions/2018-11-01/vertices/item_time), [ItemAssignment](https://api.planningcenteronline.com/docs/apps/services/versions/2018-11-01/vertices/item_assignment), [PlanPerson](https://api.planningcenteronline.com/docs/apps/services/versions/2018-11-01/vertices/plan_person), [rate limits](https://api.planningcenteronline.com/docs/overview/rate-limiting) and [versioning](https://api.planningcenteronline.com/docs/overview/versioning).
 
@@ -144,7 +144,7 @@ Ethernet uses DHCP. Configure Wi-Fi locally using `sudo nmtui`. There is no SSH 
 The default upstream is `CLAChurch/foldback-server`. Run updates manually outside gatherings. Public downloads need no campus GitHub token. For the current development prerelease:
 
 ```sh
-sudo foldback-update --install v0.4.0
+sudo foldback-update --install v0.4.1
 ```
 
 Future stable releases use:
@@ -161,7 +161,7 @@ The 0.2.0 ISO predates the updater. Download the standalone `foldback-update`, `
 ```sh
 sha256sum --check SHA256SUMS
 sudo install -o root -g root -m 0755 foldback-update /usr/local/bin/foldback-update
-sudo foldback-update --archive ./foldback-server-0.4.0-update.tar.gz --manifest ./update.json
+sudo foldback-update --archive ./foldback-server-0.4.1-update.tar.gz --manifest ./update.json
 ```
 
 The updater validates archive paths/checksum, Node/data-schema compatibility and application tests under `foldback`; stops writers; snapshots private data; atomically selects a release; installs only allowed helpers/units; and checks `/api/health` for the expected version. A failed start restores old code and pre-update data. It preserves server environment, TLS identity and campus settings/credentials. Browser sessions must log in again.

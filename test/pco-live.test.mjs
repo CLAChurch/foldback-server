@@ -202,3 +202,12 @@ test('an OAuth sign-in into another organization invalidates the previous select
   await pco.verify();assert.equal(store.state.pcoSelection,null);assert.equal(store.state.service.connected,false);
   const calls=fixture.calls.length;await sync.poll();assert.equal(fixture.calls.length,calls);
 });
+
+test('a failed manual connection test does not disable recovery of an existing selected service', async t => {
+  const { fixture, store, sync, pco } = await setup(t);
+  fixture.failure={matches:()=>true,status:503};
+  await assert.rejects(pco.verify());assert.equal(store.state.pco.verifiedAt,null);
+  assert.equal(sync.ready(),true);
+  fixture.failure=null;fixture.advance('302',fixture.now-10000);await sync.poll();
+  assert.equal(store.state.service.connected,true);assert.equal(store.state.service.currentItemId,'2');
+});

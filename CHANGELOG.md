@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1 — PCO recovery fix
+
+- Keep an already selected service eligible for automatic recovery after a manual Services connection test fails during an outage. New selections still require successful verification, and changing credentials/organization still invalidates the old selection.
+- Add a regression check for the diagnostic/recovery interaction and update the downloadable corporate handoff.
+
 ## 0.4.0 — PCO Live development preview
 
 - Add authenticated service-type/plan/service-time catalogs and a control-panel picker with a saved selection and service-type default.
