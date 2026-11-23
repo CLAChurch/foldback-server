@@ -1,0 +1,398 @@
+#!/usr/bin/python3
+"""Manual Foldback Server updates. Persistent campus data stays outside releases."""
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path, PurePosixPath
+import pwd
+import re
+import shutil
+import ssl
+import subprocess
+import tarfile
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+
+MAX_ARCHIVE = 50 * 1024 * 1024
+MAX_UNPACKED = 200 * 1024 * 1024
+DEFAULT_REPOSITORY = 'CLAChurch/foldback-server'
+ROOT_FILES = frozenset([
+    'usr/local/bin/foldback-update', 'usr/local/bin/foldback-output-watch',
+    'usr/local/bin/foldback-kiosk-session', 'usr/local/bin/foldback-console',
+    'usr/local/bin/foldback-init', 'usr/local/bin/foldback-install',
+    *['etc/systemd/system/' + name + '.service' for name in (
+        'foldback', 'foldback-init', 'foldback-kiosk', 'foldback-console',
+        'foldback-output-watch', 'foldback-installer')],
+])
+DROPIN = 'etc/systemd/system/foldback.service.d/10-release.conf'
+VERSION = re.compile(r'^v?(\d+)\.(\d+)\.(\d+)(?:-[A-Za-z0-9][A-Za-z0-9.-]*)?$')
+REPOSITORY = re.compile(r'^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+
+class UpdateError(Exception): pass
+
+def read_json(path):
+    return json.loads(Path(path).read_text())
+
+def atomic_json(path, value):
+    path = Path(path); path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + '.tmp')
+    with temporary.open('w') as output:
+        os.chmod(temporary, 0o600)
+        json.dump(value, output, indent=2); output.flush(); os.fsync(output.fileno())
+    os.replace(temporary, path)
+    fd = os.open(path.parent, os.O_RDONLY)
+    try: os.fsync(fd)
+    finally: os.close(fd)
+
+def digest(path):
+    with Path(path).open('rb') as stream: return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+def atomic_file(destination, content, mode=0o644):
+    destination = Path(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix='.' + destination.name, dir=destination.parent)
+    try:
+        with os.fdopen(fd, 'wb') as output:
+            os.fchmod(output.fileno(), mode)
+            output.write(content); output.flush(); os.fsync(output.fileno())
+        os.replace(name, destination)
+        fd = os.open(destination.parent, os.O_RDONLY)
+        try: os.fsync(fd)
+        finally: os.close(fd)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+def sync_tree(directory):
+    paths = [*Path(directory).rglob('*'), Path(directory)]
+    for path in paths:
+        fd = os.open(path, os.O_RDONLY)
+        try: os.fsync(fd)
+        finally: os.close(fd)
+
+def validate_manifest(value):
+    if not isinstance(value, dict) or value.get('format') != 1 or value.get('application') != 'foldback-server':
+        raise UpdateError('Unsupported update manifest.')
+    version = value.get('version', '')
+    if not VERSION.fullmatch(version) or version.startswith('v'):
+        raise UpdateError('Invalid release version.')
+    if value.get('archive') != f'foldback-server-{version}-update.tar.gz':
+        raise UpdateError('Unexpected update archive name.')
+    if not re.fullmatch(r'[a-f0-9]{64}', value.get('sha256', '')):
+        raise UpdateError('Invalid release checksum.')
+    schema = value.get('stateSchema', {})
+    if not isinstance(schema.get('min'), int) or not isinstance(schema.get('max'), int) or not 1 <= schema['min'] <= schema['max']:
+        raise UpdateError('Invalid supported data schema.')
+    if value.get('applianceApi') != 1 or not re.fullmatch(r'\d+\.\d+\.\d+', value.get('minimumNode', '')):
+        raise UpdateError('This update needs a newer appliance image.')
+    return value
+
+def schema_supported(schema, value):
+    return isinstance(value, int) and schema['min'] <= value <= schema['max']
+
+def extract_archive(archive, directory, manifest):
+    if Path(archive).stat().st_size > MAX_ARCHIVE or digest(archive) != manifest['sha256']:
+        raise UpdateError('Update archive checksum or size is incorrect. Nothing was installed.')
+    seen = set(); total = 0
+    with tarfile.open(archive, 'r:gz') as source:
+        for member in source:
+            name = member.name
+            parts = PurePosixPath(name).parts
+            if name.startswith('/') or '..' in parts or '\\' in name or not parts or name in seen or name.rstrip('/') != str(PurePosixPath(name)):
+                raise UpdateError('Unsafe or duplicated archive path.')
+            seen.add(name)
+            permitted = (parts[0] == 'app' and (len(parts) == 1 or parts[1] in ('src', 'public', 'test', 'docs', 'README.md', 'package.json', 'LICENSE', 'NOTICE', '.gitignore')))
+            if parts[0] == 'rootfs':
+                relative = '/'.join(parts[1:])
+                permitted = relative in ROOT_FILES or (member.isdir() and any(p.startswith(relative + '/') for p in ROOT_FILES))
+            if not permitted or (not member.isfile() and not member.isdir()) or member.mode & 0o7000:
+                raise UpdateError('Archive contains an unsupported file, link, or permission.')
+            total += member.size
+            if total > MAX_UNPACKED or len(seen) > 10000:
+                raise UpdateError('Update archive is too large.')
+            destination = Path(directory).joinpath(*parts)
+            if member.isdir(): destination.mkdir(parents=True, exist_ok=True); continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with source.extractfile(member) as incoming, destination.open('wb') as output:
+                shutil.copyfileobj(incoming, output)
+            destination.chmod(0o755 if name.startswith('rootfs/usr/local/bin/') else 0o644)
+    for path in Path(directory).rglob('*'):
+        if path.is_dir(): path.chmod(0o755)
+    app = Path(directory) / 'app'
+    for required in ('src/server.mjs', 'package.json', 'LICENSE', 'NOTICE', 'public/display.html'):
+        if not (app / required).is_file(): raise UpdateError('Update is missing required application files.')
+    if read_json(app / 'package.json').get('version') != manifest['version']:
+        raise UpdateError('Application version does not match its release manifest.')
+    return app
+
+class StripCredentialRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, *args, **kwargs):
+        redirected = super().redirect_request(request, *args, **kwargs)
+        if redirected:
+            if urllib.parse.urlsplit(redirected.full_url).scheme != 'https':
+                raise UpdateError('Refusing an insecure download redirect.')
+            if urllib.parse.urlsplit(redirected.full_url).netloc != urllib.parse.urlsplit(request.full_url).netloc:
+                redirected.remove_header('Authorization')
+        return redirected
+
+class GitHub:
+    def __init__(self, repository, token=None):
+        if not REPOSITORY.fullmatch(repository): raise UpdateError('Use a GitHub repository in OWNER/NAME form.')
+        self.repository = repository; self.token = token
+        self.client = urllib.request.build_opener(StripCredentialRedirect())
+
+    def download(self, url, limit, destination=None, asset=False):
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme != 'https' or parsed.hostname != 'api.github.com':
+            raise UpdateError('Unexpected GitHub API URL.')
+        headers = {'User-Agent': 'Foldback-Server-Updater', 'Accept': 'application/octet-stream' if asset else 'application/vnd.github+json'}
+        if self.token: headers['Authorization'] = 'Bearer ' + self.token
+        request = urllib.request.Request(url, headers=headers)
+        try:
+            with self.client.open(request, timeout=60) as response:
+                output = Path(destination).open('wb') if destination else None
+                data = bytearray(); size = 0
+                try:
+                    while chunk := response.read(1024 * 1024):
+                        size += len(chunk)
+                        if size > limit: raise UpdateError('Download exceeds the expected size.')
+                        if output: output.write(chunk)
+                        else: data.extend(chunk)
+                finally:
+                    if output: output.close()
+                return bytes(data)
+        except urllib.error.HTTPError as error:
+            raise UpdateError(f'GitHub returned HTTP {error.code}. Check the repository, release, and access.') from None
+
+    def release(self, tag):
+        suffix = 'latest' if tag == 'latest' else 'tags/' + urllib.parse.quote(tag, safe='')
+        result = json.loads(self.download(f'https://api.github.com/repos/{self.repository}/releases/{suffix}', 2 * 1024 * 1024))
+        if result.get('draft') or not VERSION.fullmatch(result.get('tag_name', '')):
+            raise UpdateError('GitHub did not return an installable published release.')
+        assets = {asset['name']: asset for asset in result.get('assets', [])}
+        if 'update.json' not in assets: raise UpdateError('This release has no app-update package. It may be an ISO-only release.')
+        manifest = validate_manifest(json.loads(self.download(assets['update.json']['url'], 65536, asset=True)))
+        if result['tag_name'] != 'v' + manifest['version']:
+            raise UpdateError('Release tag and update manifest do not match.')
+        if manifest['archive'] not in assets: raise UpdateError('The release archive is missing.')
+        return manifest, assets[manifest['archive']]['url']
+
+class System:
+    def command(self, *args):
+        subprocess.run(args, check=True)
+
+    def prepare(self, app, manifest):
+        result = subprocess.run(['node', '--version'], capture_output=True, text=True, check=True).stdout.strip().lstrip('v')
+        actual = tuple(int(n) for n in result.split('.')[:3])
+        required = tuple(int(n) for n in manifest['minimumNode'].split('.'))
+        if actual < required: raise UpdateError('Update Node.js using Debian packages before installing this release.')
+        for path in list((app/'src').rglob('*.mjs')) + list((app/'public').rglob('*.mjs')):
+            self.command('runuser', '-u', 'foldback', '--', 'node', '--check', str(path))
+        if (app/'test').is_dir():
+            subprocess.run(['runuser', '-u', 'foldback', '--', 'node', '--test'], cwd=app, check=True)
+
+    def stop(self):
+        self.command('systemctl', 'stop', 'foldback-output-watch.service', 'foldback-kiosk.service', 'foldback.service')
+
+    def start(self):
+        self.command('systemctl', 'daemon-reload')
+        self.command('systemctl', 'restart', 'foldback.service', 'foldback-output-watch.service')
+        self.command('systemctl', 'try-restart', 'foldback-console.service')
+
+    def health(self, version=None, timeout=45):
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            try:
+                path = '/api/health' if version else '/api/display'
+                with urllib.request.urlopen('http://127.0.0.1:3211' + path, timeout=3) as response: result = json.load(response)
+                if version and (result.get('version') != version or result.get('ok') is not True): raise ValueError('Wrong application version')
+                if not version and 'serverTime' not in result: raise ValueError('Display is not ready')
+                return
+            except (OSError, ValueError): time.sleep(1)
+        raise UpdateError('The updated server did not become healthy.')
+
+class Updater:
+    def __init__(self, root=Path('/'), system=None):
+        self.root = Path(root); self.system = system or System()
+        self.original = self.root/'opt/foldback'
+        self.current = self.root/'opt/foldback-current'
+        self.releases = self.root/'opt/foldback-releases'
+        self.private = self.root/'var/lib/foldback-updater'
+        self.data = self.root/'var/lib/foldback'
+        self.journal = self.private/'transaction.json'
+        self.history = self.private/'rollback.json'
+        self.private.mkdir(parents=True, exist_ok=True, mode=0o700); self.private.chmod(0o700)
+        self.releases.mkdir(parents=True, exist_ok=True, mode=0o755)
+
+    def pointer(self, target):
+        temporary = self.current.with_name('.foldback-current-' + uuid.uuid4().hex)
+        temporary.symlink_to(target, target_is_directory=True)
+        os.replace(temporary, self.current)
+        fd = os.open(self.current.parent, os.O_RDONLY)
+        try: os.fsync(fd)
+        finally: os.close(fd)
+
+    def target(self):
+        if self.current.exists() and not self.current.is_symlink(): raise UpdateError('The application pointer is not a symlink.')
+        target = self.current.resolve() if self.current.is_symlink() else self.original
+        if target != self.original and not target.is_relative_to(self.releases): raise UpdateError('Application pointer is outside the release directory.')
+        if not (target/'package.json').is_file(): raise UpdateError('No installed Foldback Server application was found.')
+        return target
+
+    def copy_data(self, source, destination):
+        if source.is_symlink() or any(p.is_symlink() for p in source.rglob('*')):
+            raise UpdateError('Persistent data contains symlinks; inspect it before updating.')
+        shutil.copytree(source, destination, copy_function=shutil.copy2)
+
+    def restore(self, transaction, restore_state):
+        self.system.stop()
+        self.pointer(Path(transaction['oldTarget']))
+        for relative, existed in transaction['rootFiles'].items():
+            target = self.root/relative; saved = Path(transaction['backup'])/'rootfs'/relative
+            if existed:
+                atomic_file(target, saved.read_bytes(), saved.stat().st_mode & 0o777)
+            else: target.unlink(missing_ok=True)
+        if restore_state:
+            backup = Path(transaction['backup'])
+            fresh = self.data.with_name('.foldback-restore-' + uuid.uuid4().hex)
+            self.copy_data(backup/'data', fresh)
+            account = pwd.getpwnam('foldback') if self.root == Path('/') else None
+            for path in [fresh, *fresh.rglob('*')]:
+                if account: os.chown(path, account.pw_uid, account.pw_gid)
+            sync_tree(fresh)
+            if self.data.exists(): os.replace(self.data, backup/('failed-data-' + uuid.uuid4().hex))
+            os.replace(fresh, self.data)
+        self.system.start(); self.system.health()
+
+    def recover(self):
+        if not self.journal.exists(): raise UpdateError('There is no interrupted update to recover.')
+        transaction = read_json(self.journal)
+        self.restore(transaction, transaction.get('restoreState', True))
+        self.journal.unlink()
+
+    def rollback(self, restore_state=False):
+        if self.journal.exists(): raise UpdateError('Recover the interrupted transaction first with --recover.')
+        if not self.history.exists(): raise UpdateError('No previous release is available.')
+        transaction = read_json(self.history)
+        state = read_json(self.data/'state.json')
+        if not restore_state and not schema_supported(transaction['oldSchema'], state.get('version')):
+            raise UpdateError('Old code cannot read current data. Use --rollback --restore-state to restore the saved snapshot, losing changes since that backup.')
+        transaction['restoreState'] = restore_state
+        atomic_json(self.journal, transaction)
+        self.restore(transaction, restore_state)
+        self.history.unlink()
+        self.journal.unlink()
+
+    def install(self, archive, manifest, repository=None):
+        manifest = validate_manifest(manifest)
+        if self.journal.exists(): raise UpdateError('An interrupted update exists. Run --recover first.')
+        old = self.target()
+        if read_json(old/'package.json')['version'] == manifest['version']:
+            raise UpdateError('That application version is already installed.')
+        state = read_json(self.data/'state.json')
+        if not schema_supported(manifest['stateSchema'], state.get('version')):
+            raise UpdateError('This release cannot read the current campus data schema.')
+        if self.data.is_mount() or self.data.stat().st_dev != self.private.stat().st_dev:
+            raise UpdateError('Persistent data must use the appliance filesystem layout; a separate data mount needs a migration first.')
+        with tempfile.TemporaryDirectory(prefix='.stage-', dir=self.releases) as temporary:
+            temporary = Path(temporary); temporary.chmod(0o755)
+            app = extract_archive(archive, temporary, manifest)
+            self.system.prepare(app, manifest)
+            target = self.releases/('v' + manifest['version'] + '-' + manifest['sha256'][:12])
+            if target.exists() or target.is_symlink():
+                if target.is_symlink() or not (target/'release.json').is_file() or read_json(target/'release.json') != manifest:
+                    raise UpdateError('This release path already exists with different contents; inspect it before retrying.')
+                # Re-validate the fresh package above, then replace a failed staging copy.
+                shutil.rmtree(target)
+            os.replace(app, target)
+            atomic_json(target/'release.json', manifest)
+            sync_tree(target)
+            backup = self.private/'backups'/(time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + uuid.uuid4().hex[:8])
+            backup.mkdir(parents=True, mode=0o700)
+            files = sorted({*ROOT_FILES.intersection(str(p.relative_to(temporary/'rootfs')) for p in (temporary/'rootfs').rglob('*') if p.is_file()), DROPIN})
+            transaction = {'oldTarget':str(old), 'newTarget':str(target), 'backup':str(backup), 'oldSchema':read_json(old/'package.json').get('foldback', {}).get('stateSchema', {'min':1,'max':1}), 'rootFiles':{}, 'phase':'preparing'}
+            # Stop writers before snapshotting credentials and original live starts.
+            self.system.stop()
+            try:
+                self.copy_data(self.data, backup/'data')
+                for relative in files:
+                    destination = self.root/relative
+                    if destination.is_symlink(): raise UpdateError('Refusing to replace a symlinked system file.')
+                    transaction['rootFiles'][relative] = destination.exists()
+                    if destination.exists():
+                        saved = backup/'rootfs'/relative; saved.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(destination, saved)
+                sync_tree(backup)
+                transaction['phase'] = 'switching'; atomic_json(self.journal, transaction)
+                for relative in files:
+                    destination = self.root/relative; destination.parent.mkdir(parents=True, exist_ok=True)
+                    if relative == DROPIN:
+                        atomic_file(destination, b'[Service]\nWorkingDirectory=/opt/foldback-current\nExecStart=\nExecStart=/usr/bin/node /opt/foldback-current/src/server.mjs\n')
+                    else:
+                        incoming = temporary/'rootfs'/relative
+                        atomic_file(destination, incoming.read_bytes(), incoming.stat().st_mode & 0o777)
+                self.pointer(target)
+                self.system.start(); self.system.health(manifest['version'])
+                atomic_json(self.history, transaction)
+                if repository: atomic_json(self.private/'repository.json', {'repository':repository})
+                self.journal.unlink()
+            except BaseException:
+                if self.journal.exists():
+                    try: self.restore(transaction, True); self.journal.unlink()
+                    except Exception: raise UpdateError('Update failed and automatic recovery was incomplete. Run --recover; keep the private backup directory.') from None
+                else: self.system.start()
+                raise
+
+def main():
+    parser = argparse.ArgumentParser(description='Manually update Foldback Server outside service time. No automatic scheduling.')
+    parser.add_argument('--repository', help='GitHub OWNER/NAME; defaults to saved upstream or CLAChurch/foldback-server')
+    operation = parser.add_mutually_exclusive_group(required=True)
+    operation.add_argument('--check', action='store_true')
+    operation.add_argument('--install', metavar='TAG', help='e.g. v0.3.0 or latest; latest uses GitHub’s stable release')
+    operation.add_argument('--archive', type=Path, help='offline update archive; requires --manifest')
+    operation.add_argument('--rollback', action='store_true')
+    operation.add_argument('--recover', action='store_true')
+    parser.add_argument('--manifest', type=Path)
+    parser.add_argument('--restore-state', action='store_true', help='with rollback, restore the pre-update snapshot instead of keeping current data')
+    args = parser.parse_args()
+    if os.geteuid() != 0: raise UpdateError('Run this command with sudo on the campus appliance.')
+    if args.restore_state and not args.rollback: raise UpdateError('--restore-state is only valid with --rollback.')
+    if not Path('/etc/foldback/server.env').is_file() or not Path('/var/lib/foldback/state.json').is_file():
+        raise UpdateError('No configured Foldback appliance was found. Pair the installed appliance before updating.')
+    updater = Updater()
+    lock = (updater.private/'lock').open('a')
+    try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError: raise UpdateError('Another update is already running.') from None
+    if args.recover: updater.recover(); print('Previous release and data restored.'); return
+    if args.rollback: updater.rollback(args.restore_state); print('Previous release restored.'); return
+    if args.archive:
+        if not args.manifest: raise UpdateError('--archive requires its release --manifest.')
+        updater.install(args.archive, read_json(args.manifest)); print('Offline update installed.'); return
+    repository = args.repository
+    if not repository:
+        try: repository = read_json(updater.private/'repository.json')['repository']
+        except FileNotFoundError: repository = DEFAULT_REPOSITORY
+    token_path = Path('/etc/foldback/github-token')
+    token = None
+    if token_path.exists():
+        if token_path.stat().st_mode & 0o077: raise UpdateError('The optional GitHub token file must be mode 0600.')
+        token = token_path.read_text().strip()
+    client = GitHub(repository, token)
+    manifest, asset = client.release(args.install or 'latest')
+    print('Repository:', repository, '\nRelease:', manifest['version'])
+    if args.check: return
+    with tempfile.TemporaryDirectory(prefix='foldback-download-') as temporary:
+        archive = Path(temporary)/manifest['archive']
+        client.download(asset, MAX_ARCHIVE, archive, asset=True)
+        updater.install(archive, manifest, repository)
+    print('Update installed. Campus passwords, PCO credentials, TLS identity, and settings were retained.')
+
+if __name__ == '__main__':
+    try: main()
+    except (UpdateError, OSError, ValueError, subprocess.CalledProcessError) as error:
+        print('UPDATE STOPPED:', error)
+        raise SystemExit(1)

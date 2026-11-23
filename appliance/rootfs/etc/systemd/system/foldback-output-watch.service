@@ -1,0 +1,12 @@
+[Unit]
+Description=Apply campus direct-TV or ProPresenter output selection
+After=foldback.service
+ConditionPathExists=!/run/live/medium
+
+[Service]
+ExecStart=/usr/local/bin/foldback-output-watch
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

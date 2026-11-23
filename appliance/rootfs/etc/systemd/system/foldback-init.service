@@ -1,0 +1,12 @@
+[Unit]
+Description=Create this campus server's TLS identity
+After=NetworkManager.service
+Before=foldback.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/foldback-init
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

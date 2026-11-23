@@ -1,0 +1,10 @@
+{
+  "name": "foldback-server",
+  "version": "0.3.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20.19" },
+  "scripts": { "start": "node src/server.mjs", "test": "node --test test/hardware.test.mjs test/model.test.mjs test/pco.test.mjs test/server.test.mjs test/startup.test.mjs" },
+  "foldback": { "applianceApi": 1, "stateSchema": { "min": 1, "max": 1 } }
+}

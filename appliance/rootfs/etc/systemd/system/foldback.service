@@ -1,0 +1,26 @@
+[Unit]
+Description=Campus Foldback server
+Requires=foldback-init.service
+After=foldback-init.service network.target
+StartLimitIntervalSec=0
+
+[Service]
+User=foldback
+Group=foldback
+WorkingDirectory=/opt/foldback
+EnvironmentFile=/etc/foldback/server.env
+ExecStart=/usr/bin/node /opt/foldback/src/server.mjs
+Restart=always
+RestartSec=3
+StateDirectory=foldback
+StateDirectoryMode=0700
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target

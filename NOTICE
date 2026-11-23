@@ -1,0 +1,18 @@
+Campus Foldback application and appliance scripts: MIT, see LICENSE.
+Atkinson Hyperlegible Next font: SIL Open Font License 1.1,
+see public/fonts/OFL.txt. The font is bundled unmodified.
+
+The Debian-based installer is an aggregate of independently licensed works.
+Debian packages, Linux, Chromium, Node.js, and bootloaders retain their own
+copyrights and licences. Their notices are installed in /usr/share/doc and
+/usr/share/common-licenses. The release includes the corresponding Debian
+source archive and the application's complete source/build scripts.
+Redistribute those accompanying sources and notices with the ISO.
+
+Only Debian's main archive is included. Proprietary wireless/GPU firmware,
+ProPresenter, and Planning Center are not bundled. Hardware requiring non-free
+firmware may need an optional separately obtained driver/firmware package.
+ProPresenter and Planning Center remain external services with their own terms.
+
+This is a Campus Foldback derivative of Debian, not an official Debian image.
+Debian is a registered trademark of Software in the Public Interest, Inc.

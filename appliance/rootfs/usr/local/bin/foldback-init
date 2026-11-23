@@ -1,0 +1,20 @@
+#!/bin/bash
+set -euo pipefail
+install -d -m 700 /etc/foldback/ca
+install -d -m 750 -o root -g foldback /etc/foldback/tls
+name=$(hostname -s)
+if [ ! -s /etc/foldback/ca/ca.key ]; then
+  openssl req -x509 -newkey rsa:3072 -nodes -days 3650 -keyout /etc/foldback/ca/ca.key -out /etc/foldback/ca/ca.crt \
+    -subj "/CN=Campus Foldback ${name} CA" -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign,cRLSign
+  chmod 600 /etc/foldback/ca/ca.key
+fi
+cp /etc/foldback/ca/ca.crt /etc/foldback/tls/ca.crt
+if [ ! -s /etc/foldback/tls/server.crt ] || ! openssl x509 -checkend 2592000 -noout -in /etc/foldback/tls/server.crt; then
+  openssl req -new -newkey rsa:3072 -nodes -keyout /etc/foldback/tls/server.key -out /etc/foldback/tls/server.csr -subj "/CN=${name}.local"
+  printf 'subjectAltName=DNS:%s.local,DNS:%s,DNS:localhost,IP:127.0.0.1\nextendedKeyUsage=serverAuth\nbasicConstraints=CA:FALSE\n' "$name" "$name" > /etc/foldback/tls/extensions
+  openssl x509 -req -in /etc/foldback/tls/server.csr -CA /etc/foldback/ca/ca.crt -CAkey /etc/foldback/ca/ca.key -CAcreateserial -days 365 \
+    -out /etc/foldback/tls/server.crt -extfile /etc/foldback/tls/extensions
+fi
+chown root:foldback /etc/foldback/tls/server.key /etc/foldback/tls/server.crt /etc/foldback/tls/ca.crt
+chmod 640 /etc/foldback/tls/server.key
+chmod 644 /etc/foldback/tls/server.crt /etc/foldback/tls/ca.crt

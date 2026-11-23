@@ -1,0 +1,18 @@
+#!/usr/bin/python3
+import json, subprocess, time
+from pathlib import Path
+
+previous = None
+while True:
+    try:
+        settings = json.loads(Path('/var/lib/foldback/state.json').read_text()).get('settings', {})
+        selected = (settings.get('output', 'direct'), settings.get('connector', 'auto'))
+        if selected != previous:
+            if selected[0] == 'propresenter':
+                subprocess.run(['systemctl', 'stop', 'foldback-kiosk.service'], check=True)
+            else:
+                subprocess.run(['systemctl', 'restart', 'foldback-kiosk.service'], check=True)
+            previous = selected
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        pass
+    time.sleep(3)

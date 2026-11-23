@@ -1,0 +1,72 @@
+FOLDBACK SERVER — DEBIAN 13 AMD64 INSTALLER
+
+This image installs the current development application. Planning Center
+credential setup works; importing a real plan and following PCO Live, plus
+actual ProPresenter playback integration, are still unfinished.
+
+USB AND HARDWARE
+Verify the ISO against SHA256SUMS. Write the ISO as a disk image to an 8 GB or
+larger USB using an image writer's raw/DD mode, not by copying the ISO file.
+Boot an x86-64 Intel/AMD mini PC from that USB. This build supports legacy BIOS
+and UEFI without Secure Boot. Recommended: 4 GB RAM, 16 GB internal storage,
+wired Ethernet, and an integrated Intel/AMD GPU. Installation is offline.
+
+The server has no full desktop. A minimal X/Chromium kiosk is included for
+direct TV output and is stopped when ProPresenter routing is selected.
+Open-source Ethernet/Wi-Fi drivers and free firmware are included. Some Wi-Fi
+and GPU hardware requires proprietary firmware, which is excluded from this
+fully open-source build. An Ethernet cable or compatible adapter may be needed.
+
+INSTALL
+The text installer excludes mounted disks and its own USB. Select a disk;
+check its model, serial, size and existing partitions; type the exact erase
+phrase. All data on that selected disk will be lost. No disk is automatically
+selected or erased. Create the Linux campus-admin password when prompted.
+After installation completes, shut down, remove the USB, and start the PC.
+
+FIRST BOOT
+The server starts without a login. A unique foldback-xxxxxx.local hostname,
+private TLS identity, and first-setup pairing code are generated on the PC.
+The direct TV display shows the pairing code until you create a campus
+control-panel password. The Linux password and control-panel password are
+separate. There are no bundled Planning Center credentials or default passwords.
+
+On another campus device, open https://foldback-xxxxxx.local:3210/admin using
+the actual hostname shown on the mini PC. For trusted HTTPS, install this
+server's public CA certificate from /ca.crt into that device's trusted roots;
+the SHA256 certificate fingerprint is shown on the mini PC console. Trust only
+the certificate belonging to your campus server. Certificates are not shared
+between installations. If .local discovery is unavailable, add the displayed
+hostname and server IP to campus DNS or the producer device's hosts file.
+
+Enter the pairing code, choose a control-panel password, then configure campus
+name and output. Connect Planning Center, or choose Connect later and load the
+sample service. Credential entry requires trusted HTTPS from a LAN browser.
+Each church supplies its own OAuth application details; a personal token is
+available for an internal integration within a single church organization.
+
+For direct output, select HDMI/DisplayPort in campus setup. For ProPresenter,
+use https://foldback-xxxxxx.local:3210/display as a web fill on the second stage
+output; trust the campus certificate on that ProPresenter computer as well.
+Actual Mac/Windows ProPresenter routing still requires an on-site test.
+
+NETWORK AND RECOVERY
+Ethernet uses DHCP. For Wi-Fi, press Ctrl+Alt+F2, log in as campus-admin, and run
+sudo nmtui. Configure an available interface, then return to the TV with
+Ctrl+Alt+F7 or the setup status console with Ctrl+Alt+F1. SSH is not installed.
+State is in /var/lib/foldback; keep backups private because they contain saved
+Planning Center credentials. After restart, sample item starts are preserved.
+Real PCO mid-service recovery remains pending the live integration.
+
+MAINTENANCE AND SHARING
+Linux/Chromium/Node packages come from Debian Stable main and security.
+Apply updates outside service time: sudo apt update && sudo apt upgrade
+Automatic sleep is disabled; automatic package timers are disabled to avoid
+unexpected changes during a gathering. Reboot after kernel updates.
+
+The application and installer scripts use MIT. Debian packages and the font
+retain their individual licences; see LICENSE, NOTICE, /usr/share/doc, and
+/usr/share/common-licenses. Share the matching Debian source archive and app
+source archive alongside this ISO and retain these notices. This is a Debian
+derivative, not an official Debian image. No ProPresenter or PCO licences are
+included or replaced. Keep private campus data and TLS keys out of shared media.

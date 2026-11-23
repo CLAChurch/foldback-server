@@ -1,0 +1,158 @@
+#!/usr/bin/python3
+"""Interactive, offline installer. There is deliberately no unattended erase option."""
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import termios
+import time
+import uuid
+
+MIN_DISK = 8 * 1024**3
+
+def run(*args, **kwargs):
+    return subprocess.run(args, check=True, text=True, **kwargs)
+
+def descendants(disk):
+    yield disk
+    for child in disk.get('children', []):
+        yield from descendants(child)
+
+def installable(disk):
+    return (disk.get('type') == 'disk' and not disk.get('ro') and int(disk.get('size', 0)) >= MIN_DISK
+            and not any(any(p for p in row.get('mountpoints', []) if p) for row in descendants(disk))
+            and not any(row.get('type') in ('crypt', 'lvm', 'raid0', 'raid1', 'raid5', 'raid10', 'md') for row in descendants(disk)))
+
+def partition(disk, number):
+    return f'{disk}{"p" if disk[-1].isdigit() else ""}{number}'
+
+def erase_phrase(disk):
+    serial = (disk.get('serial') or 'NO-SERIAL').strip()
+    return f'ERASE {disk["path"]} {serial}'
+
+def password_input(prompt):
+    # Read the actual installer input terminal, including the optional serial console.
+    # getpass's /dev/tty shortcut would use tty1 even after serial redirection.
+    fd = sys.stdin.fileno()
+    if not os.isatty(fd):
+        raise RuntimeError('An interactive terminal is required. No disk changes were made.')
+    original = termios.tcgetattr(fd)
+    hidden = original.copy(); hidden[3] &= ~termios.ECHO
+    try:
+        termios.tcsetattr(fd, termios.TCSADRAIN, hidden)
+        return input(prompt)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, original)
+        print()
+
+def list_disks():
+    result = run('lsblk', '--json', '--bytes', '--paths', '--output', 'PATH,TYPE,SIZE,MODEL,SERIAL,RO,MOUNTPOINTS', capture_output=True)
+    return json.loads(result.stdout)['blockdevices']
+
+def install(disk, password, source):
+    device = disk['path']
+    # Re-read immediately before mutation. Reject hotplug/replacement or newly mounted disks.
+    current = next((d for d in list_disks() if d.get('path') == device), None)
+    if not current or not installable(current) or any(current.get(k) != disk.get(k) for k in ('size', 'model', 'serial')):
+        raise RuntimeError('Disk changed or became busy. No disk changes were made.')
+    for program in ('parted', 'mkfs.vfat', 'mkfs.ext4', 'rsync', 'grub-install', 'chroot'):
+        import shutil
+        if not shutil.which(program):
+            raise RuntimeError(f'Missing installer component: {program}. No disk changes were made.')
+    target = Path('/mnt/foldback-target')
+    target.mkdir(parents=True, exist_ok=True)
+    if run('findmnt', '-rn', '-o', 'TARGET', capture_output=True).stdout.splitlines().count(str(target)):
+        raise RuntimeError('Installer mount point is busy. No disk changes were made.')
+    print('\nInstalling offline. Do not remove power or the USB drive.\n', flush=True)
+    run('parted', '--script', device, 'mklabel', 'gpt', 'mkpart', 'BIOS', '1MiB', '3MiB', 'set', '1', 'bios_grub', 'on',
+        'mkpart', 'EFI', 'fat32', '3MiB', '515MiB', 'set', '2', 'esp', 'on', 'mkpart', 'foldback', 'ext4', '515MiB', '100%')
+    run('partprobe', device)
+    run('udevadm', 'settle')
+    efi, root = partition(device, 2), partition(device, 3)
+    run('mkfs.vfat', '-F', '32', '-n', 'FOLDBACKEFI', efi)
+    run('mkfs.ext4', '-F', '-L', 'foldback-root', root)
+    mounted = False
+    try:
+        run('mount', root, str(target)); mounted = True
+        run('rsync', '-aHAX', '--numeric-ids', '--one-file-system', str(source) + '/', str(target) + '/')
+        (target / 'boot/efi').mkdir(parents=True, exist_ok=True)
+        run('mount', efi, str(target / 'boot/efi'))
+        root_uuid = run('blkid', '-s', 'UUID', '-o', 'value', root, capture_output=True).stdout.strip()
+        efi_uuid = run('blkid', '-s', 'UUID', '-o', 'value', efi, capture_output=True).stdout.strip()
+        (target / 'etc/fstab').write_text(f'UUID={root_uuid} / ext4 defaults,noatime 0 1\nUUID={efi_uuid} /boot/efi vfat umask=0077 0 2\n')
+        name = 'foldback-' + uuid.uuid4().hex[:6]
+        (target / 'etc/hostname').write_text(name + '\n')
+        (target / 'etc/hosts').write_text(f'127.0.0.1 localhost\n127.0.1.1 {name}.local {name}\n::1 localhost ip6-localhost ip6-loopback\n')
+        (target / 'etc/machine-id').write_text('')
+        (target / 'var/lib/dbus/machine-id').unlink(missing_ok=True)
+        (target / 'etc/default/grub').write_text('GRUB_DEFAULT=0\nGRUB_TIMEOUT=3\nGRUB_DISTRIBUTOR="Campus Foldback"\nGRUB_CMDLINE_LINUX_DEFAULT=""\nGRUB_CMDLINE_LINUX="console=ttyS0,115200n8 console=tty0"\nGRUB_DISABLE_OS_PROBER=true\n')
+        for mount in ('dev', 'proc', 'sys', 'run'):
+            run('mount', '--rbind', '/' + mount, str(target / mount))
+            run('mount', '--make-rslave', str(target / mount))
+        run('chroot', str(target), 'useradd', '--create-home', '--shell', '/bin/bash', '--groups', 'sudo', 'campus-admin')
+        run('chroot', str(target), 'chpasswd', input='campus-admin:' + password + '\n')
+        run('chroot', str(target), 'passwd', '--lock', 'root')
+        run('chroot', str(target), 'grub-install', '--target=i386-pc', '--recheck', device)
+        run('chroot', str(target), 'grub-install', '--target=x86_64-efi', '--efi-directory=/boot/efi', '--bootloader-id=Foldback', '--removable', '--no-nvram')
+        run('chroot', str(target), 'update-grub')
+        run('sync')
+    finally:
+        if mounted:
+            subprocess.run(['umount', '--recursive', str(target)], check=False)
+    print(f'\nINSTALL COMPLETE\nControl panel after reboot: https://{name}.local:3210/admin\n')
+
+def main():
+    if os.geteuid() != 0 or not Path('/run/live/medium').is_dir():
+        raise RuntimeError('Run this installer only after booting the Campus Foldback USB. No disk changes were made.')
+    if 'foldback.console=serial' in Path('/proc/cmdline').read_text().split():
+        terminal = os.open('/dev/ttyS0', os.O_RDWR)
+        for stream in (0, 1, 2): os.dup2(terminal, stream)
+    lock = open('/run/foldback-installer.lock', 'w')
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    source = Path('/run/live/rootfs/filesystem.squashfs')
+    if not (source / 'opt/foldback/src/server.mjs').is_file():
+        raise RuntimeError('The verified live system source is unavailable. No disk changes were made.')
+    while True:
+        print('\nCAMPUS FOLDBACK — DEBIAN 13 OFFLINE INSTALLER\n')
+        print('1. Install to a disk (erases the selected disk after confirmation)')
+        print('2. Configure Ethernet or Wi-Fi')
+        print('3. Shut down\n')
+        answer = input('Choose 1, 2 or 3: ').strip()
+        if answer == '2':
+            subprocess.run(['nmtui'], check=False); continue
+        if answer == '3':
+            run('systemctl', 'poweroff'); return
+        if answer != '1': continue
+        disks = [d for d in list_disks() if installable(d)]
+        if not disks:
+            print('No eligible disks. Need at least 8 GiB; mounted disks and this USB are excluded.'); continue
+        for i, disk in enumerate(disks, 1):
+            print(f'{i}. {disk["path"]}  {int(disk["size"])/1024**3:.1f} GiB  Model: {disk.get("model") or "not reported"}  Serial: {disk.get("serial") or "not reported"}')
+        selected = input('Disk number (Enter cancels): ').strip()
+        if not selected.isdigit() or not 1 <= int(selected) <= len(disks): continue
+        disk = disks[int(selected) - 1]
+        print('\nTHIS DISK AND ALL ITS PARTITIONS WILL BE ERASED:\n')
+        run('lsblk', '--paths', '--output', 'NAME,SIZE,FSTYPE,LABEL,MODEL,SERIAL,MOUNTPOINTS', disk['path'])
+        phrase = erase_phrase(disk)
+        print('\nTo confirm, type exactly: ' + phrase)
+        if input('Confirmation: ').strip() != phrase:
+            print('Cancelled. No disk changes were made.'); continue
+        password = password_input('Create the Linux campus-admin password (12+ characters): ')
+        if len(password) < 12 or len(password) > 256 or '\n' in password or ':' in password:
+            print('Password must be 12–256 characters and contain no colon. No disk changes were made.'); continue
+        if password_input('Confirm Linux password: ') != password:
+            print('Passwords did not match. No disk changes were made.'); continue
+        install(disk, password, source)
+        input('Remove the USB after shutdown. Press Enter to shut down: ')
+        run('systemctl', 'poweroff'); return
+
+if __name__ == '__main__':
+    try: main()
+    except (KeyboardInterrupt, EOFError):
+        print('\nInstaller stopped.'); sys.exit(0)
+    except Exception as error:
+        print(f'\nINSTALLATION STOPPED: {error}\nDo not assume a completed installation. Restart from the USB to retry.', flush=True)
+        time.sleep(30); sys.exit(1)

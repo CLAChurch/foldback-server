@@ -1,0 +1,15 @@
+[Unit]
+Description=Local foldback TV renderer
+After=foldback.service
+Conflicts=getty@tty7.service
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/bin/xinit /usr/local/bin/foldback-kiosk-session -- /usr/bin/Xorg :0 vt7 -nolisten tcp -s 0 -dpms
+Restart=on-failure
+RestartSec=5
+TTYPath=/dev/tty7
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+KillMode=control-group
