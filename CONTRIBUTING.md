@@ -32,6 +32,6 @@ Add meaningful tests for timing, authentication, persistence, integrations or in
 
 Use a descriptive branch and PR title. Explain what changed, why and how it was verified. Keep generated `artifacts/`, data, credentials, certificates and VM files out of commits. Report vulnerabilities using [SECURITY.md](SECURITY.md), without posting secrets publicly.
 
-Release maintainers follow [UPDATES.md](docs/UPDATES.md). Tag workflows publish development prereleases. Full Debian ISO builds and matching source redistribution are separate from application update releases.
+Release maintainers follow [UPDATES.md](docs/UPDATES.md). Tag workflows stage application packages in drafts. Attach the validated Debian ISO and its matching source and notice files before publishing.
 
 By contributing, you agree that your original contribution is licensed under the project's MIT licence. Preserve third-party copyright and licence notices.

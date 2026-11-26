@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Test only NEW virtual-disk files. Never accepts a physical target device."""
 import argparse
+import hashlib
 import http.cookiejar
 import json
 import os
@@ -90,6 +91,7 @@ class VM:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('iso', type=Path)
+    parser.add_argument('--version', help='Expected Foldback application version')
     args = parser.parse_args()
     iso = args.iso.resolve()
     if not iso.is_file() or iso.suffix != '.iso': raise RuntimeError('An existing ISO file is required')
@@ -97,16 +99,24 @@ def main():
     qemu = qemu_dir / 'bin/qemu-system-x86_64'
     image_tool = qemu_dir / 'bin/qemu-img'
     xorriso = os.environ.get('XORRISO', 'xorriso')
-    work = Path(tempfile.mkdtemp(prefix='vm-test-', dir=ROOT/'artifacts/build'))
+    build_dir = ROOT/'artifacts/build'
+    release_dir = ROOT/'artifacts/release'
+    build_dir.mkdir(parents=True, exist_ok=True)
+    release_dir.mkdir(parents=True, exist_ok=True)
+    receipt = release_dir/'ISO-VALIDATED.json'
+    receipt.unlink(missing_ok=True)
+    with iso.open('rb') as image:
+        iso_sha256 = hashlib.file_digest(image, 'sha256').hexdigest()
+    work = Path(tempfile.mkdtemp(prefix='vm-test-', dir=build_dir))
     proof = work / 'proof'; proof.mkdir()
     results = []
     def passed(message):
         results.append(message); print(message, flush=True)
-        (ROOT/'artifacts/release/VM-VALIDATION.txt').write_text('\n'.join(results) + '\n')
+        (release_dir/'VM-VALIDATION.txt').write_text('\n'.join(results) + '\n')
 
     metadata = execute(xorriso, '-indev', iso, '-report_el_torito', 'plain', '-report_system_area', 'plain', capture_output=True)
     text = metadata.stdout + metadata.stderr
-    (ROOT/'artifacts/release/BOOT-METADATA.txt').write_text(text)
+    (release_dir/'BOOT-METADATA.txt').write_text(text)
     assert 'BIOS' in text and 'UEFI' in text
     passed('PASS: ISO contains BIOS and UEFI El Torito boot entries and hybrid disk metadata.')
     execute(xorriso, '-osirrox', 'on', '-indev', iso, '-extract', '/live', work/'live', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -168,6 +178,10 @@ def main():
                 data=json.dumps(body).encode() if body is not None else None,
                 headers={'Content-Type': 'application/json'})
             return json.load(client.open(request, timeout=30))
+        installed_version = api('/api/health')['version']
+        if args.version and installed_version != args.version:
+            raise RuntimeError(f'Expected Foldback {args.version}, installed {installed_version}')
+        passed(f'PASS: Installed Foldback application reports version {installed_version}.')
         assert not api('/api/auth/status')['configured']
         code = json.loads((proof/'pairing.json').read_text())['code']
         api('/api/auth/setup', {'code':code, 'password':APP_PASSWORD})
@@ -199,6 +213,7 @@ def main():
         passed('LIMITS: Physical HP/Lenovo hardware, actual HDMI/DisplayPort, Wi-Fi firmware, PCO Live and ProPresenter routing are not verified by VM tests.')
     finally:
         if active: active.stop()
+    receipt.write_text(json.dumps({'version': installed_version, 'sha256': iso_sha256}) + '\n')
     print('Validation logs: ' + str(work), flush=True)
 
 if __name__ == '__main__': main()

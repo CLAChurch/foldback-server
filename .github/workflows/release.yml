@@ -1,4 +1,4 @@
-name: App update prerelease
+name: Draft release
 on:
   push:
     tags: ['v*']
@@ -24,12 +24,12 @@ jobs:
       - run: npm test
       - run: python3 -m unittest discover -s appliance/tests -v
       - run: python3 tools/build-update.py
-      - name: Publish development update
+      - name: Stage application update
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: >-
           gh release create "$RELEASE_TAG" artifacts/update/*
-          --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease
+          --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease --draft
           --title "Foldback Server $RELEASE_TAG — development preview"
           --notes-file .github/RELEASE-NOTES.md
