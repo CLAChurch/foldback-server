@@ -97,9 +97,25 @@ Review package changes and reboot when required. The image disables automatic pa
 
 1. Update `package.json`, `CHANGELOG.md`, and any compatibility metadata. Run `npm test` and `python3 -m unittest discover -s appliance/tests -v`.
 2. Commit the exact release source. `python3 tools/build-update.py` rejects a dirty tree; `--allow-dirty` is for local testing only.
-3. Push a matching `vVERSION` tag. The release workflow reruns tests, checks tag/version agreement, builds the small update assets, and creates a **prerelease**. Promote a release to stable only after the intended validation.
-4. Test an offline update on the Debian appliance, state retention, startup-failure restoration, and rollback. Test physical campus hardware and integrations before calling a release production-ready.
+3. Push a matching `vVERSION` tag. The workflow reruns tests, checks tag/version agreement and attaches the app-update assets to a **draft** prerelease.
+4. Build the USB installer from a clean checkout of that exact tag using [BUILD.md](../appliance/BUILD.md). Run the BIOS/UEFI offline-install checks with the expected app version. On the validation host, run these commands from the repository root, with `version` set to the app version without its leading `v` and `build_dir` set to the completed VM output directory.
 
-The workflow builds application packages only. For a fresh USB ISO, use [BUILD.md](../appliance/BUILD.md), retain all matching sources/notices, and complete BIOS/UEFI offline-install validation. Old ISO downloads retain their original version; an app-update tag does not rebuild or revalidate them.
+   ```sh
+   release_dir="$PWD/artifacts/iso-release-v$version"
+   python3 appliance/test-vm.py "$build_dir/foldback-server-$version-debian13-amd64.iso" --version "$version"
+   python3 tools/prepare-iso-release.py "$build_dir" \
+     --validation artifacts/release --version "$version" --output "$release_dir"
+   (cd "$release_dir" && sha256sum --check ISO-SHA256SUMS)
+   ```
 
-Each GitHub release asset must be smaller than 2 GiB. The Debian source archive can be larger, so split it using `tools/prepare-iso-release.py` and publish **all** parts plus `ISO-SHA256SUMS` and `SOURCE-PARTS.txt`. Rejoin and verify before using the source archive. Never commit ISO files, VM disks, generated campus state or private backups to Git.
+5. Attach the contents of that directory to the corresponding draft. Confirm all assets finished uploading, including the ISO, both checksum files, the app update, and all matching sources, then publish the prerelease.
+
+   ```sh
+   gh release upload "v$version" "$release_dir"/* --repo CLAChurch/foldback-server
+   gh release view "v$version" --repo CLAChurch/foldback-server --json isDraft,assets
+   gh release edit "v$version" --repo CLAChurch/foldback-server --draft=false
+   ```
+
+6. Test an offline update on the Debian appliance, state retention, startup-failure restoration, and rollback. Test physical campus hardware and integrations before promoting to stable.
+
+Each GitHub release asset must be smaller than 2 GiB. The preparation tool splits the Debian source archive and includes all parts, `ISO-SHA256SUMS` and `SOURCE-PARTS.txt`. Rejoin and verify before using the source archive. Never commit ISO files, VM disks, generated campus state or private backups to Git.

@@ -7,7 +7,9 @@ to campus disks. Hardware acceleration is helpful but not required.
 
 Mount this source checkout read-only at `/source`, and an empty output directory
 at `/out`, or set `FOLDBACK_SOURCE` and `FOLDBACK_OUTPUT` to equivalent absolute
-paths. Then run:
+paths. Enable signed Debian source repositories alongside the binary
+repositories in the VM so the build can download matching Linux kernel sources.
+Then run:
 
 ```sh
 bash /source/appliance/build-in-vm.sh
@@ -55,3 +57,6 @@ pointing to a QEMU installation (containing `bin` and `share/qemu`) and optional
 never accepts a physical disk. It boots the ISO as a USB disk in BIOS and UEFI,
 then uses an isolated serial console for an offline install. Validation results
 are written to `artifacts/release/VM-VALIDATION.txt`.
+Pass `--version VERSION` to require the installed app to report that version.
+After all checks pass, the validator records the installed version and tested ISO
+checksum for release packaging. See [the release process](../docs/UPDATES.md#maintainer-release-process).

@@ -30,9 +30,9 @@ The server works independently of the Mac or Windows machine running ProPresente
 
 ## Releases
 
-The existing **0.2.0 ISO** is a Debian 13 installer. **0.3.0** introduced the updater; **0.4.0** adds PCO Live synchronization. These are application updates; they do not turn the 0.2.0 ISO into a newly built or validated 0.4.0 image. Bootstrap the updater once on an existing appliance using [these instructions](docs/UPDATES.md). Each download is identified by its own version.
+Starting with **0.4.1**, each release is prepared with two installation options: a bootable Debian 13 amd64 USB ISO for a fresh installation and a versioned application package for an existing appliance. The historical 0.2.0 installer is archived with the 0.3.0 release. Bootstrap the updater once on an existing 0.2.0 appliance using [these instructions](docs/UPDATES.md).
 
-Large ISO files and matching Linux/Debian sources are release assets, never Git commits. Keep the matching source archives, build configuration, checksums and notices when redistributing an ISO. The automated tag workflow publishes small application-update packages; building and validating a complete OS image is a separate process.
+The tag workflow stages the application update in a GitHub draft. Maintainers build and validate the ISO from the same tag and attach it with matching sources, checksums and notices before publishing.
 
 ## Install on a mini PC
 
